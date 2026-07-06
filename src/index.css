@@ -1,0 +1,269 @@
+@import "tailwindcss";
+
+:root {
+  --cv-navy: #0A0E2B;
+  --cv-blue: #374880;
+  --cv-silver: #AD9EB4;
+  --cv-light-silver: #A9A6B0;
+  --cv-soft-silver: rgba(169, 166, 176, 0.14);
+  --cv-soft-silver-2: rgba(173, 158, 180, 0.18);
+}
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    background-color: #f5f4f7;
+    color: #1a1a1a;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-brand {
+    font-family: 'Cinzel', serif;
+  }
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#374880];
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-[#374880] px-4 py-2 text-xs font-black uppercase tracking-wide text-white transition hover:bg-[#0A0E2B];
+  }
+
+  .btn-dark {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-gray-950 px-4 py-2 text-xs font-black uppercase tracking-wide text-white transition hover:bg-[#374880];
+  }
+
+  .btn-light {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-800 transition hover:bg-gray-100;
+  }
+
+  .qty {
+    @apply h-7 w-7 rounded border border-gray-300 bg-white text-sm font-black text-gray-900 hover:bg-gray-100;
+  }
+}
+
+/* Themed scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #e9e7ec;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--cv-blue);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--cv-navy);
+}
+
+/* =========================
+   THEME OVERRIDES
+   Re-map previous orange/cyan brand utilities
+   to Deep Navy / Dark Blue / Silver palette
+   ========================= */
+
+/* Deep navy replacements */
+[class~="bg-[#0b2240]"] {
+  background-color: var(--cv-navy) !important;
+}
+
+[class~="text-[#0b2240]"] {
+  color: var(--cv-navy) !important;
+}
+
+[class~="border-[#0b2240]"],
+[class~="border-2"][class*="border-[#0b2240]"] {
+  border-color: var(--cv-navy) !important;
+}
+
+/* Cyan / bright blue -> silver + dark blue accent */
+[class~="text-[#00c3f8]"],
+[class~="hover:text-[#00c3f8]"]:hover {
+  color: var(--cv-silver) !important;
+}
+
+[class~="bg-[#00c3f8]/10"] {
+  background-color: rgba(173, 158, 180, 0.12) !important;
+}
+
+[class~="bg-[#00c3f8]/20"] {
+  background-color: rgba(173, 158, 180, 0.18) !important;
+}
+
+[class~="border-[#00c3f8]/30"] {
+  border-color: rgba(173, 158, 180, 0.3) !important;
+}
+
+[class~="hover:bg-[#00c3f8]"]:hover {
+  background-color: var(--cv-blue) !important;
+}
+
+[class~="ring-[#00c3f8]/20"] {
+  --tw-ring-color: rgba(173, 158, 180, 0.2) !important;
+}
+
+/* Main accent orange -> dark blue accent */
+[class~="bg-[#f68b1e]"],
+[class~="accent-[#f68b1e]"] {
+  background-color: var(--cv-blue) !important;
+  accent-color: var(--cv-blue) !important;
+}
+
+[class~="text-[#f68b1e]"],
+[class~="hover:text-[#f68b1e]"]:hover,
+[class~="focus:text-[#f68b1e]"]:focus {
+  color: var(--cv-blue) !important;
+}
+
+[class~="border-[#f68b1e]"],
+[class~="ring-[#f68b1e]"] {
+  border-color: var(--cv-blue) !important;
+  --tw-ring-color: var(--cv-blue) !important;
+}
+
+[class~="focus:border-[#f68b1e]"]:focus {
+  border-color: var(--cv-blue) !important;
+}
+
+[class~="focus:ring-[#f68b1e]"]:focus {
+  --tw-ring-color: var(--cv-blue) !important;
+}
+
+[class~="hover:bg-[#f68b1e]"]:hover,
+[class~="hover:bg-[#e07b18]"]:hover {
+  background-color: var(--cv-navy) !important;
+}
+
+/* Orange utility palette -> silvers / dark blue */
+[class~="bg-orange-50"],
+[class~="bg-orange-100"],
+[class~="bg-orange-50/40"],
+[class~="bg-orange-50/60"],
+[class~="bg-orange-50/20"] {
+  background-color: var(--cv-soft-silver) !important;
+}
+
+[class~="border-orange-100"],
+[class~="border-orange-200"],
+[class~="border-orange-300"] {
+  border-color: var(--cv-silver) !important;
+}
+
+[class~="text-orange-600"],
+[class~="text-orange-700"],
+[class~="text-orange-800"],
+[class~="text-orange-900"],
+[class~="text-orange-950"] {
+  color: var(--cv-blue) !important;
+}
+
+[class~="hover:bg-orange-50"]:hover,
+[class~="hover:bg-orange-100"]:hover {
+  background-color: var(--cv-soft-silver-2) !important;
+}
+
+[class~="hover:text-orange-600"]:hover,
+[class~="hover:text-orange-700"]:hover,
+[class~="hover:text-orange-800"]:hover,
+[class~="hover:text-orange-900"]:hover {
+  color: var(--cv-navy) !important;
+}
+
+/* Amber utility palette -> silver-based */
+[class~="bg-amber-50"],
+[class~="bg-amber-100"],
+[class~="bg-amber-200"] {
+  background-color: rgba(173, 158, 180, 0.16) !important;
+}
+
+[class~="border-amber-100"],
+[class~="border-amber-200"],
+[class~="border-amber-300"] {
+  border-color: var(--cv-light-silver) !important;
+}
+
+[class~="text-amber-600"],
+[class~="text-amber-700"],
+[class~="text-amber-800"],
+[class~="text-amber-900"],
+[class~="text-amber-950"] {
+  color: var(--cv-blue) !important;
+}
+
+[class~="hover:bg-amber-600"]:hover,
+[class~="hover:bg-amber-500"]:hover,
+[class~="hover:bg-amber-50"]:hover {
+  background-color: var(--cv-navy) !important;
+}
+
+[class~="hover:text-amber-600"]:hover,
+[class~="hover:text-amber-700"]:hover,
+[class~="hover:text-amber-800"]:hover {
+  color: var(--cv-navy) !important;
+}
+
+/* Group hover accent overrides */
+.group:hover [class~="group-hover:bg-[#f68b1e]"] {
+  background-color: var(--cv-blue) !important;
+}
+
+.group:hover [class~="group-hover:text-[#f68b1e]"] {
+  color: var(--cv-blue) !important;
+}
+
+.group:hover [class~="group-hover:text-amber-600"],
+.group:hover [class~="group-hover:text-red-600"],
+.group:hover [class~="group-hover:text-blue-600"],
+.group:hover [class~="group-hover:text-green-600"],
+.group:hover [class~="group-hover:text-purple-600"],
+.group:hover [class~="group-hover:text-rose-600"],
+.group:hover [class~="group-hover:text-teal-600"] {
+  color: var(--cv-blue) !important;
+}
+
+.group:hover [class~="group-hover:bg-blue-600"],
+.group:hover [class~="group-hover:bg-amber-600"],
+.group:hover [class~="group-hover:bg-red-600"],
+.group:hover [class~="group-hover:bg-green-600"],
+.group:hover [class~="group-hover:bg-purple-600"],
+.group:hover [class~="group-hover:bg-rose-600"],
+.group:hover [class~="group-hover:bg-teal-600"] {
+  background-color: var(--cv-blue) !important;
+}
+
+/* Soften assorted accent backgrounds into the new palette */
+[class~="bg-blue-50"],
+[class~="bg-purple-50"],
+[class~="bg-green-50"],
+[class~="bg-rose-50"],
+[class~="bg-teal-50"] {
+  background-color: var(--cv-soft-silver) !important;
+}
+
+[class~="border-blue-100"],
+[class~="border-purple-100"],
+[class~="border-green-100"],
+[class~="border-rose-100"],
+[class~="border-teal-100"] {
+  border-color: var(--cv-light-silver) !important;
+}
+
+[class~="text-blue-600"],
+[class~="text-blue-700"],
+[class~="text-blue-800"],
+[class~="text-purple-600"],
+[class~="text-purple-700"],
+[class~="text-green-600"],
+[class~="text-green-700"],
+[class~="text-teal-600"],
+[class~="text-rose-600"] {
+  color: var(--cv-blue) !important;
+}

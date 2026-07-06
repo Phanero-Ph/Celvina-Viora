@@ -1,0 +1,406 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- ENUMS ---
+enum UserRole {
+  CUSTOMER
+  VENDOR
+  AFFILIATE
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum BNPLStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  RESTRICTED
+  NOT_APPLIED
+}
+
+enum InstallmentType {
+  WEEKLY
+  MONTHLY
+  PAY_ONCE
+}
+
+enum OrderStatus {
+  ONGOING_0_DELIVERED
+  ELIGIBLE_50_DELIVERY
+  DELIVERED_50_ONGOING
+  ELIGIBLE_100_DELIVERY
+  DELIVERED_100_COMPLETED
+  PAY_ONCE_100_DELIVERED
+  DEFAULTED
+}
+
+enum InstallmentStatus {
+  PENDING
+  PAID
+  OVERDUE
+}
+
+enum DispatchStatus {
+  NOT_ASSIGNED
+  DISPATCH_APPROVED
+  PENDING_PICKUP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+}
+
+enum VoucherStatus {
+  SCHEDULED
+  ACTIVE
+  EXPIRED
+  EXHAUSTED
+  DISABLED
+}
+
+enum TicketStatus {
+  OPEN
+  PENDING
+  RESOLVED
+}
+
+enum RefundMethod {
+  WALLET_CREDIT
+  EXTERNAL_REFUND
+}
+
+enum AuditCategory {
+  SECURITY
+  FINANCE
+  CATALOG
+  SUPPORT
+  LOGISTICS
+}
+
+// --- MODELS ---
+
+model User {
+  id              String        @id @default(uuid())
+  email           String        @unique
+  password        String
+  fullName        String
+  phone           String
+  whatsappNumber  String?
+  role            UserRole      @default(CUSTOMER)
+  isVerified      Boolean       @default(false)
+  emailVerifiedAt DateTime?
+  emailVerificationTokenHash String?
+  emailVerificationExpiresAt DateTime?
+  bnplStatus      BNPLStatus    @default(NOT_APPLIED)
+  creditLimit     Int           @default(0)
+  creditScore     Int?
+  walletBalance   Float         @default(0)
+  restrictedReason String?
+  address         String?
+  residentialAddress String?
+  phone2          String?
+  picture         String?
+  businessName    String?
+  businessDescription String?
+  businessLogo    String?
+  socialMediaLinks Json?
+  bankName        String?
+  accountName     String?
+  accountNumber   String?
+  adminPermissions Json?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  orders              Order[]
+  paymentMethods      PaymentMethod[]
+  notifications       Notification[]
+  tickets             SupportTicket[]
+  refunds             Refund[]
+  auditLogs           AuditLog[]
+  creditLimitRequests CreditLimitRequest[]
+  voucherRedemptions  VoucherRedemption[]
+  emailVerificationTokens EmailVerificationToken[]
+  emailVerificationOtps EmailVerificationOtp[]
+}
+
+model EmailVerificationOtp {
+  id        String   @id @default(uuid())
+  userId    String
+  otpHash   String
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Product {
+  id                   String   @id @default(uuid())
+  name                 String
+  category             String // Clothing, Shoes, Bags, Accessories
+  price                Float
+  image                String
+  description          String
+  inStock              Boolean  @default(true)
+  isActive             Boolean  @default(true)
+  stockQuantity        Int      @default(0)
+  reorderLevel         Int      @default(5)
+  flashSaleEnabled     Boolean  @default(false)
+  bulkDiscountEligible Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  orderItems OrderItem[]
+}
+
+model Order {
+  id                    String           @id @default(uuid())
+  userId                String
+  totalItemsAmount      Float
+  deliveryFee           Float
+  totalAmount           Float
+  installmentType       InstallmentType
+  duration              Int
+  installmentAmount     Float
+  paymentsCompleted     Int              @default(0)
+  paymentsRemaining     Int
+  status                OrderStatus
+  deliveryAddress       String
+  consecutiveMissedCount Int             @default(0)
+  courier               String?
+  trackingNumber        String?
+  dispatchStatus        DispatchStatus?  @default(NOT_ASSIGNED)
+  voucherCode           String?
+  discountAmount        Float?
+  orderSource           String           @default("Customer Self-Service") // Customer Self-Service, Admin Concierge
+  conciergeMeta         Json?            // Stores assignedStaff, sendChannel, notes, quoteStatus, etc.
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  user       User                @relation(fields: [userId], references: [id])
+  items      OrderItem[]
+  schedule   InstallmentSchedule[]
+  refunds    Refund[]
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  productId String
+  name      String
+  price     Float
+  quantity  Int
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model InstallmentSchedule {
+  id                String             @id @default(uuid())
+  orderId           String
+  installmentNumber Int
+  dueDate           DateTime
+  amount            Float
+  status            InstallmentStatus  @default(PENDING)
+  paidAt            DateTime?
+  paymentMethod     String?
+  paymentRef        String?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, installmentNumber])
+}
+
+model PaymentMethod {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String   // Paystack Card Tokenization, Direct Debit Mandate, Virtual Account
+  details   String
+  isDefault Boolean  @default(false)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  channel   String   // Email, SMS, WhatsApp
+  type      String   // info, success, warning, danger
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Voucher {
+  id                      String   @id @default(uuid())
+  code                    String   @unique
+  name                    String
+  discountType            String   // fixed, percentage
+  discountValue           Float
+  minSpend                Float
+  active                  Boolean  @default(true)
+  claimsCount             Int      @default(0)
+  startsAt                DateTime?
+  endsAt                  DateTime?
+  appliesTo               String   @default("All Products") // All Products, Specific Categories, Specific Products
+  allowedCategories       String[] // Array of categories
+  allowedProductIds       String[] // Array of product IDs
+  targetSegments          String[] // Array of segments
+  firstOrderOnly          Boolean  @default(false)
+  maxDiscountCap          Float?
+  allowWithFlashSale      Boolean  @default(false)
+  allowWithBulkDiscount   Boolean  @default(true)
+  allowWithWalletCredit   Boolean  @default(true)
+  deliveryFeeOnly         Boolean  @default(false)
+  minInstallmentDuration  Int?
+  validInstallmentTypes   String[] // Array of types
+  minQuantity             Int?
+  allowForConciergeOrders Boolean  @default(true)
+  allowForSelfServiceOrders Boolean @default(true)
+  oneUsePerPhone          Boolean  @default(false)
+  oneUsePerEmail          Boolean  @default(false)
+  maxUniqueCustomers      Int?
+  batchGroup              String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  redemptions VoucherRedemption[]
+}
+
+model VoucherRedemption {
+  id             String   @id @default(uuid())
+  voucherCode    String
+  userId         String
+  orderId        String
+  discountAmount Float
+  usedAt         DateTime @default(now())
+  orderSource    String
+
+  voucher Voucher @relation(fields: [voucherCode], references: [code])
+  user    User    @relation(fields: [userId], references: [id])
+}
+
+model SupportTicket {
+  id        String       @id @default(uuid())
+  userId    String
+  subject   String
+  message   String
+  status    TicketStatus @default(OPEN)
+  adminReply String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Refund {
+  id        String        @id @default(uuid())
+  userId    String
+  orderId   String?
+  amount    Float
+  method    RefundMethod
+  reason    String
+  status    String        @default("Processed")
+  createdAt DateTime      @default(now())
+
+  user  User  @relation(fields: [userId], references: [id])
+  order Order? @relation(fields: [orderId], references: [id])
+}
+
+model AuditLog {
+  id          String        @id @default(uuid())
+  action      String
+  category    AuditCategory
+  performedBy String
+  details     String
+  timestamp   DateTime      @default(now())
+
+  user User @relation(fields: [performedBy], references: [id]) // Assuming performedBy is userId, or we can make it a string for system
+}
+
+model CreditLimitRequest {
+  id              String   @id @default(uuid())
+  userId          String
+  requestedAmount Float
+  reason          String
+  status          String   @default("Pending") // Pending, Approved, Rejected
+  createdAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model StoreSettings {
+  id                            String  @id @default("global_settings")
+  baseDeliveryFee               Float   @default(4000)
+  wholesaleDiscountPercent      Float   @default(10)
+  bulkThreshold                 Int     @default(5)
+  flashSaleActive               Boolean @default(false)
+  flashSaleDiscountPercent      Float   @default(20)
+  flashSaleDurationHours        Int     @default(6)
+  flashSaleAutoReset            Boolean @default(true)
+  retryAttempts                 Int     @default(3)
+  retryIntervalHours            Int     @default(48)
+  minCreditLimit                Float   @default(250000)
+  defaultCreditLimit            Float   @default(500000)
+  maxCreditLimit                Float   @default(2000000)
+  allowWalletRefunds            Boolean @default(true)
+  allowExternalRefunds          Boolean @default(true)
+  maxRefundWithoutApproval      Float   @default(20000)
+  refundWindowDays              Int     @default(7)
+  dispatchSLAFirstHours         Int     @default(48)
+  dispatchSLAFinalHours         Int     @default(72)
+  voucherMaxUsesPerCustomer     Int     @default(2)
+  voucherMaxGlobalRedemptions   Int     @default(500)
+  allowVoucherWithFlashSale     Boolean @default(false)
+  voucherAppliesToDeliveryFee   Boolean @default(false)
+  gracePeriodDays               Int     @default(2)
+  reminderLeadDays              Int     @default(3)
+  firstDispatchPercentage       Float   @default(50)
+  finalDispatchPercentage       Float   @default(50)
+  categoryMultiplierClothing    Float   @default(1.05)
+  categoryMultiplierShoes       Float   @default(1.15)
+  categoryMultiplierBags        Float   @default(1.2)
+  categoryMultiplierAccessories Float   @default(1.0)
+  deliveryZoneLagos             Float   @default(0)
+  deliveryZoneAbuja             Float   @default(1500)
+  deliveryZoneSouthWest         Float   @default(1000)
+  deliveryZoneNorth             Float   @default(3000)
+  deliveryZoneInternational     Float   @default(10000)
+  maxGoodwillCredit             Float   @default(25000)
+  maintenanceMode               Boolean @default(false)
+  maintenanceMessage            String  @default("System under maintenance.")
+  maintenanceBrowseOnly         Boolean @default(true)
+  riskSensitivity               String  @default("Standard")
+}

@@ -1,0 +1,244 @@
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateUserDto } from './dto/create-user.dto';
+import { CreateAdminDto } from './dto/create-admin.dto';
+import * as bcrypt from 'bcrypt';
+import { createHash } from 'crypto';
+import { UserRole } from '@prisma/client';
+
+@Injectable()
+export class UsersService {
+  constructor(private prisma: PrismaService) {}
+
+  async create(createUserDto: CreateUserDto) {
+    const normalizedEmail = createUserDto.email.trim().toLowerCase();
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    if (existingUser) {
+      throw new ConflictException('Email already exists');
+    }
+
+    const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
+
+    return this.prisma.user.create({
+      data: {
+        email: normalizedEmail,
+        fullName: createUserDto.fullName.trim(),
+        phone: createUserDto.phone.trim(),
+        role: createUserDto.role,
+        isVerified: createUserDto.isVerified,
+        whatsappNumber: createUserDto.whatsappNumber?.trim(),
+        address: createUserDto.address?.trim(),
+        residentialAddress: createUserDto.residentialAddress?.trim(),
+        picture: createUserDto.picture?.trim(),
+        businessName: createUserDto.businessName?.trim(),
+        businessDescription: createUserDto.businessDescription?.trim(),
+        businessLogo: createUserDto.businessLogo?.trim(),
+        socialMediaLinks: createUserDto.socialMediaLinks,
+        bankName: createUserDto.bankName?.trim(),
+        accountName: createUserDto.accountName?.trim(),
+        accountNumber: createUserDto.accountNumber?.trim(),
+        password: hashedPassword,
+      },
+    });
+  }
+
+  async findByEmail(email: string) {
+    return this.prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
+  }
+
+  async findById(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    return user;
+  }
+
+  async createAdmin(createAdminDto: CreateAdminDto) {
+    const normalizedEmail = createAdminDto.email.trim().toLowerCase();
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    if (existingUser) {
+      throw new ConflictException('Email already exists');
+    }
+
+    const hashedPassword = await bcrypt.hash(createAdminDto.password, 10);
+
+    const admin = await this.prisma.user.create({
+      data: {
+        email: normalizedEmail,
+        password: hashedPassword,
+        fullName: createAdminDto.fullName.trim(),
+        phone: createAdminDto.phone.trim(),
+        role: UserRole.ADMIN,
+        isVerified: true,
+        emailVerifiedAt: new Date(),
+        adminPermissions: createAdminDto.permissions,
+      },
+    });
+    const { password, emailVerificationTokenHash, emailVerificationExpiresAt, ...safeAdmin } = admin;
+    return safeAdmin;
+  }
+
+  async updateAdminPermissions(adminId: string, permissions: string[]) {
+    const admin = await this.prisma.user.findUnique({
+      where: { id: adminId },
+    });
+
+    if (!admin) {
+      throw new NotFoundException('Admin not found');
+    }
+
+    if (admin.role !== UserRole.ADMIN) {
+      throw new BadRequestException('Only admin account permissions can be reassigned');
+    }
+
+    const updatedAdmin = await this.prisma.user.update({
+      where: { id: adminId },
+      data: {
+        adminPermissions: permissions,
+      },
+    });
+    const { password, emailVerificationTokenHash, emailVerificationExpiresAt, ...safeAdmin } = updatedAdmin;
+    return safeAdmin;
+  }
+
+  async setEmailVerificationToken(userId: string, token: string, expiresAt: Date) {
+    return this.prisma.emailVerificationToken.create({
+      data: {
+        userId,
+        tokenHash: this.hashToken(token),
+        expiresAt,
+      },
+    });
+  }
+
+  async findByVerificationToken(token: string) {
+    return this.prisma.emailVerificationToken.findFirst({
+      where: {
+        tokenHash: this.hashToken(token),
+        usedAt: null,
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+      include: {
+        user: true,
+      },
+    });
+  }
+
+  async markEmailVerified(userId: string, tokenId?: string) {
+    const verifiedAt = new Date();
+    const result = await this.prisma.$transaction(async tx => {
+      if (tokenId) {
+        await tx.emailVerificationToken.update({
+          where: { id: tokenId },
+          data: { usedAt: verifiedAt },
+        });
+      }
+
+      return tx.user.update({
+        where: { id: userId },
+        data: {
+          isVerified: true,
+          emailVerifiedAt: verifiedAt,
+          emailVerificationTokenHash: null,
+          emailVerificationExpiresAt: null,
+        },
+      });
+    });
+
+    return result;
+  }
+
+  async createEmailVerificationOtp(userId: string, otp: string, expiresAt: Date) {
+    await this.prisma.emailVerificationOtp.updateMany({
+      where: { userId, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    return this.prisma.emailVerificationOtp.create({
+      data: {
+        userId,
+        otpHash: this.hashToken(otp),
+        expiresAt,
+      },
+    });
+  }
+
+  async verifyEmailOtp(email: string, otp: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (!user) return null;
+
+    const otpRecord = await this.prisma.emailVerificationOtp.findFirst({
+      where: {
+        userId: user.id,
+        otpHash: this.hashToken(otp),
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+        attempts: { lt: 5 },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!otpRecord) {
+      await this.prisma.emailVerificationOtp.updateMany({
+        where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } },
+        data: { attempts: { increment: 1 } },
+      });
+      return null;
+    }
+
+    const verifiedAt = new Date();
+    return this.prisma.$transaction(async tx => {
+      await tx.emailVerificationOtp.update({
+        where: { id: otpRecord.id },
+        data: { usedAt: verifiedAt },
+      });
+
+      await tx.emailVerificationOtp.updateMany({
+        where: { userId: user.id, usedAt: null },
+        data: { usedAt: verifiedAt },
+      });
+
+      return tx.user.update({
+        where: { id: user.id },
+        data: {
+          isVerified: true,
+          emailVerifiedAt: verifiedAt,
+          emailVerificationTokenHash: null,
+          emailVerificationExpiresAt: null,
+        },
+      });
+    });
+  }
+
+  async findAll() {
+    return this.prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        phone: true,
+        role: true,
+        bnplStatus: true,
+        creditLimit: true,
+        walletBalance: true,
+        isVerified: true,
+        adminPermissions: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  private hashToken(token: string) {
+    return createHash('sha256').update(token).digest('hex');
+  }
+}
