@@ -67,6 +67,7 @@ interface AppContextType {
   resendEmailVerification: (email: string) => Promise<string>;
   forgotPassword: (email: string) => Promise<string>;
   resetPassword: (payload: { token: string; password: string }) => Promise<string>;
+  uploadImage: (file: File) => Promise<string>;
   logoutUser: () => void;
   addToCart: (product: Product, quantity?: number) => void;
   loadProducts: () => Promise<Product[]>;
@@ -513,6 +514,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const resetPassword = async (payload: { token: string; password: string }) => {
     const response = await apiClient.post('/auth/reset-password', payload);
     return response.data.message || 'Password reset successfully. You can now log in.';
+  };
+
+  const uploadImage = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiClient.post('/uploads/image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data.url;
   };
 
   const createAdminUser = async (payload: { fullName: string; email: string; phone: string; password: string; permissions: string[] }) => {
@@ -1115,6 +1125,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     resendEmailVerification,
     forgotPassword,
     resetPassword,
+    uploadImage,
     logoutUser,
     addToCart,
     loadProducts,

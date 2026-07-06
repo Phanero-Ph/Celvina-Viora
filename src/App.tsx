@@ -506,6 +506,7 @@ const CustomerDashboard: React.FC = () => {
     updateNotificationPreferences,
     loadSupportTickets,
     createSupportTicket,
+    uploadImage,
     settings,
   } = useApp();
   const [activePage, setActivePage] = useState<'overview' | 'profile' | 'shopping' | 'payments' | 'wallet' | 'delivery' | 'support' | 'community' | 'rewards' | 'notifications'>('overview');
@@ -565,12 +566,16 @@ const CustomerDashboard: React.FC = () => {
     setNotice(result.message);
   };
 
-  const handleProfilePhotoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleProfilePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setProfileAvatar(String(reader.result));
-    reader.readAsDataURL(file);
+    try {
+      const url = await uploadImage(file);
+      setProfileAvatar(url);
+      setNotice('Profile photo uploaded.');
+    } catch {
+      setNotice('Unable to upload profile photo right now.');
+    }
   };
 
   const saveAddress = () => {
@@ -928,7 +933,7 @@ const CustomerDashboard: React.FC = () => {
 };
 
 const VendorDashboard: React.FC = () => {
-  const { currentUser, vendorProfiles, products, orders, vendorAds, settings, vendorAddProduct, vendorCreateAd, vendorWithdraw } = useApp();
+  const { currentUser, vendorProfiles, products, orders, vendorAds, settings, vendorAddProduct, vendorCreateAd, vendorWithdraw, uploadImage } = useApp();
   const [activePage, setActivePage] = useState<'overview' | 'products' | 'sales' | 'advertising' | 'moneyBox' | 'analytics'>('overview');
   const vendor = vendorProfiles.find(item => item.userId === currentUser.id);
   const vendorOwnerIds = [vendor?.id, currentUser.id].filter(Boolean);
@@ -937,6 +942,7 @@ const VendorDashboard: React.FC = () => {
   const activeAds = vendor ? vendorAds.filter(ad => ad.vendorId === vendor.id) : [];
   const [productName, setProductName] = useState('New Vendor Fashion Item');
   const [price, setPrice] = useState('35000');
+  const [productImage, setProductImage] = useState('https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?auto=format&fit=crop&w=900&q=80');
   const [withdrawAmount, setWithdrawAmount] = useState('10000');
   const [notice, setNotice] = useState('');
 
@@ -948,7 +954,7 @@ const VendorDashboard: React.FC = () => {
       name: productName,
       category: 'Clothing',
       price: Number(price),
-      image: 'https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?auto=format&fit=crop&w=900&q=80',
+      image: productImage,
       description: 'Vendor uploaded fashion product.',
       inStock: true,
       isActive: true,
@@ -957,6 +963,18 @@ const VendorDashboard: React.FC = () => {
       setNotice('Product uploaded successfully.');
     } catch {
       setNotice('Unable to upload product right now.');
+    }
+  };
+
+  const handleProductImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const url = await uploadImage(file);
+      setProductImage(url);
+      setNotice('Product image uploaded.');
+    } catch {
+      setNotice('Unable to upload product image right now.');
     }
   };
 
@@ -987,6 +1005,11 @@ const VendorDashboard: React.FC = () => {
           <div className="grid gap-3">
             <input value={productName} onChange={e => setProductName(e.target.value)} className="input" />
             <input type="number" value={price} onChange={e => setPrice(e.target.value)} className="input" />
+            <label className="block rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm text-gray-600">
+              <span className="mb-2 block text-xs font-black uppercase text-gray-500">Product image</span>
+              <input type="file" accept="image/*" onChange={handleProductImageUpload} className="block w-full text-xs file:mr-3 file:rounded-lg file:border-0 file:bg-[#374880] file:px-3 file:py-2 file:text-xs file:font-black file:uppercase file:text-white" />
+              {productImage && <img src={productImage} alt="Product preview" className="mt-3 h-20 w-20 rounded-lg border border-gray-200 object-cover" />}
+            </label>
             <button onClick={createProduct} className="btn-primary">Upload product</button>
           </div>
         </Panel>}
@@ -1576,7 +1599,7 @@ const AuthModal: React.FC<{
   initialMode: 'login' | 'signup';
   onAuthenticated: (user: User) => void;
 }> = ({ isOpen, onClose, initialMode, onAuthenticated }) => {
-  const { registerUser, loginUser, resendEmailVerification, verifyEmailOtp, forgotPassword, resetPassword } = useApp();
+  const { registerUser, loginUser, resendEmailVerification, verifyEmailOtp, forgotPassword, resetPassword, uploadImage } = useApp();
   const [mode, setMode] = useState<'login' | 'signup' | 'otp' | 'forgot' | 'reset'>(initialMode);
   const [role, setRole] = useState<'customer' | 'vendor'>('customer');
   const [fullName, setFullName] = useState('');
@@ -1761,7 +1784,7 @@ const AuthModal: React.FC<{
     }
   };
 
-  const handleBusinessLogoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBusinessLogoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
@@ -1773,13 +1796,15 @@ const AuthModal: React.FC<{
       event.target.value = '';
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setBusinessLogo(String(reader.result || ''));
+    try {
+      const url = await uploadImage(file);
+      setBusinessLogo(url);
       setBusinessLogoName(file.name);
       setError('');
-    };
-    reader.readAsDataURL(file);
+    } catch {
+      setError('Unable to upload business logo right now.');
+      event.target.value = '';
+    }
   };
 
   return (
