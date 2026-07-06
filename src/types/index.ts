@@ -38,6 +38,8 @@ export interface User {
   businessDescription?: string;
   businessLogo?: string;
   socialMediaLinks?: Record<string, string>;
+  savedAddresses?: string[];
+  notificationPreferences?: NotificationPreferences;
   bankName?: string;
   accountName?: string;
   accountNumber?: string;
@@ -144,6 +146,26 @@ export interface AppNotification {
   type: 'info' | 'success' | 'warning';
   createdAt: string;
   read: boolean;
+}
+
+export interface NotificationPreferences {
+  email: boolean;
+  whatsapp: boolean;
+  push: boolean;
+  orders: boolean;
+  payments: boolean;
+  promotions: boolean;
+}
+
+export interface SupportTicket {
+  id: string;
+  userId: string;
+  subject: string;
+  message: string;
+  status: 'OPEN' | 'PENDING' | 'RESOLVED' | 'Open' | 'Pending' | 'Resolved';
+  adminReply?: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface WalletTransaction {

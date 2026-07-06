@@ -112,6 +112,8 @@ model User {
   businessDescription String?
   businessLogo    String?
   socialMediaLinks Json?
+  savedAddresses Json?
+  notificationPreferences Json?
   bankName        String?
   accountName     String?
   accountNumber   String?

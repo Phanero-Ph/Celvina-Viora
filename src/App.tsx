@@ -478,6 +478,7 @@ const CustomerDashboard: React.FC = () => {
     refunds,
     notifications,
     communityPosts,
+    supportTickets,
     fundWallet,
     withdrawWallet,
     payNextInstallment,
@@ -488,6 +489,10 @@ const CustomerDashboard: React.FC = () => {
     toggleWishlist,
     addCommunityPost,
     markNotificationRead,
+    updateCustomerProfile,
+    updateNotificationPreferences,
+    loadSupportTickets,
+    createSupportTicket,
     settings,
   } = useApp();
   const [activePage, setActivePage] = useState<'overview' | 'profile' | 'shopping' | 'payments' | 'wallet' | 'delivery' | 'support' | 'community' | 'rewards' | 'notifications'>('overview');
@@ -500,18 +505,17 @@ const CustomerDashboard: React.FC = () => {
   const [profileWhatsapp, setProfileWhatsapp] = useState(currentUser.whatsappNumber || currentUser.phone);
   const [profileAvatar, setProfileAvatar] = useState(currentUser.avatar || '');
   const [newAddress, setNewAddress] = useState(currentUser.address || 'Lagos, Nigeria');
-  const [savedAddresses, setSavedAddresses] = useState<string[]>([currentUser.address || 'Lagos, Nigeria']);
+  const [savedAddresses, setSavedAddresses] = useState<string[]>(currentUser.savedAddresses?.length ? currentUser.savedAddresses : [currentUser.address || 'Lagos, Nigeria']);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<'All' | ProductCategory>('All');
   const [priceLimit, setPriceLimit] = useState(250000);
   const [paymentChannel, setPaymentChannel] = useState('Paystack Checkout');
   const [supportSubject, setSupportSubject] = useState('Order support request');
   const [supportBody, setSupportBody] = useState('I need help with my order, delivery, payment, refund, or return.');
-  const [supportTickets, setSupportTickets] = useState<Array<{ id: string; subject: string; status: string }>>([]);
   const [communityTitle, setCommunityTitle] = useState('My style inspiration');
   const [communityBody, setCommunityBody] = useState('Share an outfit idea, styling question, or fashion experience.');
   const [promoCode, setPromoCode] = useState('CELVINA10');
-  const [preferences, setPreferences] = useState({ email: true, whatsapp: true, push: true, orders: true, payments: true, promotions: false });
+  const [preferences, setPreferences] = useState(currentUser.notificationPreferences || { email: true, whatsapp: true, push: true, orders: true, payments: true, promotions: false });
 
   const myOrders = orders.filter(order => order.userId === currentUser.id);
   const myTransactions = walletTransactions.filter(txn => txn.userId === currentUser.id);
@@ -548,15 +552,45 @@ const CustomerDashboard: React.FC = () => {
     setNotice('Delivery address saved.');
   };
 
-  const submitSupportTicket = (type: 'Support' | 'Complaint' | 'Return') => {
-    setSupportTickets(prev => [{ id: `TCK-${Math.floor(1000 + Math.random() * 9000)}`, subject: `${type}: ${supportSubject}`, status: 'Open' }, ...prev]);
-    setNotice(`${type} ticket submitted. Customer support will respond by email.`);
+  const saveProfile = async () => {
+    const nextAddresses = savedAddresses.includes(newAddress.trim()) || !newAddress.trim()
+      ? savedAddresses
+      : [newAddress.trim(), ...savedAddresses];
+    setSavedAddresses(nextAddresses);
+    try {
+      await updateCustomerProfile({
+        fullName: profileName,
+        phone: profilePhone,
+        whatsappNumber: profileWhatsapp,
+        picture: profileAvatar,
+        address: nextAddresses[0],
+        savedAddresses: nextAddresses,
+      });
+      setNotice('Profile and delivery addresses saved.');
+    } catch {
+      setNotice('Unable to save profile right now.');
+    }
+  };
+
+  const submitSupportTicket = async (type: 'Support' | 'Complaint' | 'Return') => {
+    try {
+      await createSupportTicket({ subject: `${type}: ${supportSubject}`, message: supportBody });
+      setNotice(`${type} ticket submitted. Customer support will respond by email.`);
+    } catch {
+      setNotice('Unable to submit support ticket right now.');
+    }
   };
 
   const buyNow = (product: Product) => {
     addToCart(product, 1);
     setNotice(`${product.name} is ready for checkout. Open cart to complete payment.`);
   };
+
+  useEffect(() => {
+    if (activePage === 'support') {
+      loadSupportTickets().catch(() => setNotice('Unable to load support tickets right now.'));
+    }
+  }, [activePage]);
 
   return (
     <DashboardSidebarFrame
@@ -615,13 +649,13 @@ const CustomerDashboard: React.FC = () => {
               <input value={currentUser.email} className="input bg-gray-50" disabled placeholder="Email address" />
               <input value={profilePhone} onChange={e => setProfilePhone(e.target.value)} className="input" placeholder="Phone number" />
               <input value={profileWhatsapp} onChange={e => setProfileWhatsapp(e.target.value)} className="input" placeholder="WhatsApp number" />
-              <button onClick={() => setNotice('Profile changes saved for this session.')} className="btn-primary">Save profile</button>
+              <button onClick={saveProfile} className="btn-primary">Save profile</button>
             </div>
           </Panel>
           <Panel title="Saved Delivery Addresses">
             <div className="flex gap-2">
               <input value={newAddress} onChange={e => setNewAddress(e.target.value)} className="input" placeholder="Delivery address" />
-              <button onClick={saveAddress} className="btn-dark">Save</button>
+              <button onClick={saveAddress} className="btn-dark">Add</button>
             </div>
             <List items={savedAddresses} render={address => <span>{address}</span>} empty="No saved delivery addresses." />
             <button onClick={() => setNotice('Password reset link will be sent through the authentication email flow.')} className="btn-light mt-3">Password reset</button>
@@ -821,6 +855,7 @@ const CustomerDashboard: React.FC = () => {
                 </label>
               ))}
             </div>
+            <button onClick={() => updateNotificationPreferences(preferences).then(() => setNotice('Notification preferences saved.')).catch(() => setNotice('Unable to save notification preferences right now.'))} className="btn-primary mt-3">Save preferences</button>
           </Panel>
           <Panel title="Notification Center">
             <List items={myNotifications} render={item => <span><strong>{item.title}</strong> - {item.message} {!item.read && <button onClick={() => markNotificationRead(item.id)} className="ml-2 text-[#374880] font-black">Mark read</button>}</span>} empty="No notifications." />

@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
+import { CreateSupportTicketDto, UpdateCustomerProfileDto, UpdateNotificationPreferencesDto } from './dto/customer-profile.dto';
 import * as bcrypt from 'bcrypt';
 import { createHash } from 'crypto';
 import { UserRole } from '@prisma/client';
@@ -106,6 +107,55 @@ export class UsersService {
     });
     const { password, emailVerificationTokenHash, emailVerificationExpiresAt, ...safeAdmin } = updatedAdmin;
     return safeAdmin;
+  }
+
+  async updateCustomerProfile(userId: string, updateProfileDto: UpdateCustomerProfileDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        fullName: updateProfileDto.fullName?.trim(),
+        phone: updateProfileDto.phone?.trim(),
+        whatsappNumber: updateProfileDto.whatsappNumber?.trim(),
+        picture: updateProfileDto.picture?.trim(),
+        address: updateProfileDto.address?.trim(),
+        savedAddresses: updateProfileDto.savedAddresses,
+      },
+    });
+    const { password, emailVerificationTokenHash, emailVerificationExpiresAt, ...safeUser } = updatedUser;
+    return safeUser;
+  }
+
+  async updateNotificationPreferences(userId: string, preferencesDto: UpdateNotificationPreferencesDto) {
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        notificationPreferences: { ...preferencesDto },
+      },
+    });
+    const { password, emailVerificationTokenHash, emailVerificationExpiresAt, ...safeUser } = updatedUser;
+    return safeUser;
+  }
+
+  async listSupportTickets(userId: string) {
+    return this.prisma.supportTicket.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createSupportTicket(userId: string, createSupportTicketDto: CreateSupportTicketDto) {
+    return this.prisma.supportTicket.create({
+      data: {
+        userId,
+        subject: createSupportTicketDto.subject.trim(),
+        message: createSupportTicketDto.message.trim(),
+      },
+    });
   }
 
   async setEmailVerificationToken(userId: string, token: string, expiresAt: Date) {
@@ -227,6 +277,11 @@ export class UsersService {
         email: true,
         fullName: true,
         phone: true,
+        whatsappNumber: true,
+        address: true,
+        picture: true,
+        savedAddresses: true,
+        notificationPreferences: true,
         role: true,
         bnplStatus: true,
         creditLimit: true,

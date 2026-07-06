@@ -10,6 +10,8 @@ import {
   Product,
   RefundRequest,
   Review,
+  NotificationPreferences,
+  SupportTicket,
   User,
   UserRole,
   VendorAd,
@@ -56,6 +58,7 @@ interface AppContextType {
   vendorAds: VendorAd[];
   affiliateRecords: AffiliateRecord[];
   communityPosts: CommunityPost[];
+  supportTickets: SupportTicket[];
   switchUser: (roleOrId: UserRole | string) => void;
   registerUser: (payload: RegistrationPayload) => Promise<User>;
   loginUser: (payload: { email: string; password: string }) => Promise<User>;
@@ -80,6 +83,10 @@ interface AppContextType {
   vendorCreateAd: (productId: string, placement: VendorAd['placement'], days: 1 | 2) => void;
   vendorWithdraw: (amount: number) => { success: boolean; message: string };
   addCommunityPost: (title: string, body: string) => void;
+  updateCustomerProfile: (payload: { fullName: string; phone: string; whatsappNumber?: string; picture?: string; address?: string; savedAddresses?: string[] }) => Promise<User>;
+  updateNotificationPreferences: (preferences: NotificationPreferences) => Promise<User>;
+  loadSupportTickets: () => Promise<SupportTicket[]>;
+  createSupportTicket: (payload: { subject: string; message: string }) => Promise<SupportTicket>;
   createAdminUser: (payload: { fullName: string; email: string; phone: string; password: string; permissions: string[] }) => Promise<User>;
   updateAdminPermissions: (adminId: string, permissions: string[]) => Promise<User>;
 }
@@ -152,6 +159,8 @@ const adaptApiUser = (apiUser: any): User => ({
   businessDescription: apiUser.businessDescription || undefined,
   businessLogo: apiUser.businessLogo || undefined,
   socialMediaLinks: apiUser.socialMediaLinks || undefined,
+  savedAddresses: Array.isArray(apiUser.savedAddresses) ? apiUser.savedAddresses : undefined,
+  notificationPreferences: apiUser.notificationPreferences || undefined,
   bankName: apiUser.bankName || undefined,
   accountName: apiUser.accountName || undefined,
   accountNumber: apiUser.accountNumber || undefined,
@@ -179,6 +188,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [vendorAds, setVendorAds] = useState<VendorAd[]>(() => readSaved('cv_market_ads', INITIAL_VENDOR_ADS));
   const [affiliateRecords, setAffiliateRecords] = useState<AffiliateRecord[]>(() => readSaved('cv_market_affiliates', INITIAL_AFFILIATE_RECORDS));
   const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>(() => readSaved('cv_market_community', INITIAL_COMMUNITY_POSTS));
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>(() => readSaved('cv_market_support_tickets', []));
 
   const currentUser = users.find(user => user.id === currentUserId) || users[0];
   const wishlist = wishlistByUser[currentUser.id] || [];
@@ -222,6 +232,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { localStorage.setItem('cv_market_ads', JSON.stringify(vendorAds)); }, [vendorAds]);
   useEffect(() => { localStorage.setItem('cv_market_affiliates', JSON.stringify(affiliateRecords)); }, [affiliateRecords]);
   useEffect(() => { localStorage.setItem('cv_market_community', JSON.stringify(communityPosts)); }, [communityPosts]);
+  useEffect(() => { localStorage.setItem('cv_market_support_tickets', JSON.stringify(supportTickets)); }, [supportTickets]);
 
   const notify = (userId: string, title: string, message: string, type: AppNotification['type'] = 'info') => {
     setNotifications(prev => [{
@@ -660,6 +671,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, ...prev]);
   };
 
+  const updateCustomerProfile = async (payload: { fullName: string; phone: string; whatsappNumber?: string; picture?: string; address?: string; savedAddresses?: string[] }) => {
+    const response = await apiClient.patch('/users/me/profile', payload);
+    const updatedUser = adaptApiUser(response.data);
+    setUsers(prev => prev.map(user => user.id === updatedUser.id ? { ...user, ...updatedUser } : user));
+    return updatedUser;
+  };
+
+  const updateNotificationPreferences = async (preferences: NotificationPreferences) => {
+    const response = await apiClient.patch('/users/me/notification-preferences', preferences);
+    const updatedUser = adaptApiUser(response.data);
+    setUsers(prev => prev.map(user => user.id === updatedUser.id ? { ...user, ...updatedUser } : user));
+    return updatedUser;
+  };
+
+  const loadSupportTickets = async () => {
+    const response = await apiClient.get('/users/me/support-tickets');
+    setSupportTickets(response.data);
+    return response.data;
+  };
+
+  const createSupportTicket = async (payload: { subject: string; message: string }) => {
+    const response = await apiClient.post('/users/me/support-tickets', payload);
+    setSupportTickets(prev => [response.data, ...prev]);
+    return response.data;
+  };
+
   const value = useMemo<AppContextType>(() => ({
     settings: PLATFORM_SETTINGS,
     isAuthenticated,
@@ -677,6 +714,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     vendorAds,
     affiliateRecords,
     communityPosts,
+    supportTickets,
     switchUser,
     registerUser,
     loginUser,
@@ -701,9 +739,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     vendorCreateAd,
     vendorWithdraw,
     addCommunityPost,
+    updateCustomerProfile,
+    updateNotificationPreferences,
+    loadSupportTickets,
+    createSupportTicket,
     createAdminUser,
     updateAdminPermissions,
-  }), [isAuthenticated, currentUser, users, products, cart, wishlist, orders, reviews, notifications, walletTransactions, refunds, vendorProfiles, vendorAds, affiliateRecords, communityPosts]);
+  }), [isAuthenticated, currentUser, users, products, cart, wishlist, orders, reviews, notifications, walletTransactions, refunds, vendorProfiles, vendorAds, affiliateRecords, communityPosts, supportTickets]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
