@@ -65,12 +65,15 @@ interface AppContextType {
   verifyEmail: (token: string) => Promise<string>;
   verifyEmailOtp: (payload: { email: string; otp: string }) => Promise<string>;
   resendEmailVerification: (email: string) => Promise<string>;
+  forgotPassword: (email: string) => Promise<string>;
+  resetPassword: (payload: { token: string; password: string }) => Promise<string>;
   logoutUser: () => void;
   addToCart: (product: Product, quantity?: number) => void;
   updateCartQuantity: (productId: string, quantity: number) => void;
   removeFromCart: (productId: string) => void;
   clearCart: () => void;
   toggleWishlist: (productId: string) => void;
+  loadWishlist: () => Promise<string[]>;
   createOrder: (input: CreateOrderInput) => { success: boolean; message: string };
   payNextInstallment: (orderId: string) => void;
   confirmDelivery: (orderId: string) => void;
@@ -82,7 +85,8 @@ interface AppContextType {
   vendorAddProduct: (product: Omit<Product, 'id' | 'vendorName' | 'source' | 'rating' | 'reviewCount'>) => void;
   vendorCreateAd: (productId: string, placement: VendorAd['placement'], days: 1 | 2) => void;
   vendorWithdraw: (amount: number) => { success: boolean; message: string };
-  addCommunityPost: (title: string, body: string) => void;
+  addCommunityPost: (title: string, body: string) => Promise<CommunityPost | void>;
+  loadCommunityPosts: () => Promise<CommunityPost[]>;
   updateCustomerProfile: (payload: { fullName: string; phone: string; whatsappNumber?: string; picture?: string; address?: string; savedAddresses?: string[] }) => Promise<User>;
   updateNotificationPreferences: (preferences: NotificationPreferences) => Promise<User>;
   loadSupportTickets: () => Promise<SupportTicket[]>;
@@ -135,6 +139,13 @@ const addMonths = (date: Date, months: number) => {
 
 const makeId = (prefix: string) => `${prefix}-${Math.floor(100000 + Math.random() * 900000)}`;
 
+const enrichProduct = (product: Product, index = 0): Product => ({
+  ...product,
+  brand: product.brand || (product.source === 'Celvina Viora' ? 'Celvina Viora' : product.vendorName),
+  color: product.color || ['Black', 'Blue', 'Gold', 'Green', 'Pink', 'White'][index % 6],
+  sizes: product.sizes || (product.category === 'Accessories' || product.category === 'Bags' ? ['One Size'] : ['S', 'M', 'L', 'XL']),
+});
+
 const roleFromApi = (role: string): UserRole => {
   const normalized = role.toLowerCase();
   if (normalized === 'vendor' || normalized === 'affiliate' || normalized === 'admin') return normalized;
@@ -176,7 +187,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(localStorage.getItem('cv_auth_token')));
   const [users, setUsers] = useState<User[]>(() => readSaved('cv_market_users', INITIAL_USERS));
   const [currentUserId, setCurrentUserId] = useState(() => readSaved('cv_market_current_user', INITIAL_USERS[0].id));
-  const [products, setProducts] = useState<Product[]>(() => readSaved('cv_market_products', INITIAL_PRODUCTS));
+  const [products, setProducts] = useState<Product[]>(() => readSaved('cv_market_products', INITIAL_PRODUCTS).map(enrichProduct));
   const [cart, setCart] = useState<CartItem[]>(() => readSaved('cv_market_cart', []));
   const [wishlistByUser, setWishlistByUser] = useState<Record<string, string[]>>(() => readSaved('cv_market_wishlist', {}));
   const [orders, setOrders] = useState<Order[]>(() => readSaved('cv_market_orders', INITIAL_ORDERS));
@@ -350,6 +361,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return response.data.message || 'Verification email sent. Please check your inbox.';
   };
 
+  const forgotPassword = async (email: string) => {
+    const response = await apiClient.post('/auth/forgot-password', { email: email.trim().toLowerCase() });
+    return response.data.message || 'If an account exists, a password reset email has been sent.';
+  };
+
+  const resetPassword = async (payload: { token: string; password: string }) => {
+    const response = await apiClient.post('/auth/reset-password', payload);
+    return response.data.message || 'Password reset successfully. You can now log in.';
+  };
+
   const createAdminUser = async (payload: { fullName: string; email: string; phone: string; password: string; permissions: string[] }) => {
     const response = await apiClient.post('/users/admins', {
       fullName: payload.fullName,
@@ -414,6 +435,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         : [...current, productId];
       return { ...prev, [currentUser.id]: next };
     });
+    if (isAuthenticated) {
+      apiClient.post('/users/me/wishlist/toggle', { productId }).catch(() => undefined);
+    }
+  };
+
+  const loadWishlist = async () => {
+    const response = await apiClient.get('/users/me/wishlist');
+    const productIds = response.data.map((item: any) => item.productId);
+    setWishlistByUser(prev => ({ ...prev, [currentUser.id]: productIds }));
+    return productIds;
   };
 
   const createOrder = ({ paymentPlan, duration, deliveryAddress, affiliateCode }: CreateOrderInput) => {
@@ -660,15 +691,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true, message: 'Vendor withdrawal sent to bank account.' };
   };
 
-  const addCommunityPost = (title: string, body: string) => {
-    setCommunityPosts(prev => [{
+  const addCommunityPost = async (title: string, body: string) => {
+    if (isAuthenticated) {
+      const response = await apiClient.post('/users/community/posts', { title, body });
+      setCommunityPosts(prev => [response.data, ...prev]);
+      return response.data;
+    }
+
+    const post = {
       id: makeId('post'),
       userFullName: currentUser.fullName,
       title,
       body,
       likes: 0,
       createdAt: new Date().toISOString(),
-    }, ...prev]);
+    };
+    setCommunityPosts(prev => [post, ...prev]);
+    return post;
+  };
+
+  const loadCommunityPosts = async () => {
+    const response = await apiClient.get('/users/community/posts');
+    setCommunityPosts(response.data);
+    return response.data;
   };
 
   const updateCustomerProfile = async (payload: { fullName: string; phone: string; whatsappNumber?: string; picture?: string; address?: string; savedAddresses?: string[] }) => {
@@ -721,12 +766,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     verifyEmail,
     verifyEmailOtp,
     resendEmailVerification,
+    forgotPassword,
+    resetPassword,
     logoutUser,
     addToCart,
     updateCartQuantity,
     removeFromCart,
     clearCart,
     toggleWishlist,
+    loadWishlist,
     createOrder,
     payNextInstallment,
     confirmDelivery,
@@ -739,6 +787,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     vendorCreateAd,
     vendorWithdraw,
     addCommunityPost,
+    loadCommunityPosts,
     updateCustomerProfile,
     updateNotificationPreferences,
     loadSupportTickets,

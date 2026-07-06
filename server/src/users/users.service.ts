@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
-import { CreateSupportTicketDto, UpdateCustomerProfileDto, UpdateNotificationPreferencesDto } from './dto/customer-profile.dto';
+import { CreateCommunityPostDto, CreateSupportTicketDto, UpdateCustomerProfileDto, UpdateNotificationPreferencesDto } from './dto/customer-profile.dto';
 import * as bcrypt from 'bcrypt';
 import { createHash } from 'crypto';
 import { UserRole } from '@prisma/client';
@@ -158,6 +158,66 @@ export class UsersService {
     });
   }
 
+  async listWishlist(userId: string) {
+    return this.prisma.wishlistItem.findMany({
+      where: { userId },
+      include: { product: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async toggleWishlist(userId: string, productId: string) {
+    const existing = await this.prisma.wishlistItem.findUnique({
+      where: { userId_productId: { userId, productId } },
+    });
+
+    if (existing) {
+      await this.prisma.wishlistItem.delete({ where: { id: existing.id } });
+      return { productId, saved: false };
+    }
+
+    await this.prisma.wishlistItem.create({
+      data: { userId, productId },
+    });
+    return { productId, saved: true };
+  }
+
+  async listCommunityPosts() {
+    const posts = await this.prisma.communityPost.findMany({
+      include: { user: { select: { fullName: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return posts.map(post => ({
+      id: post.id,
+      userFullName: post.user.fullName,
+      title: post.title,
+      body: post.body,
+      likes: post.likes,
+      createdAt: post.createdAt,
+    }));
+  }
+
+  async createCommunityPost(userId: string, createCommunityPostDto: CreateCommunityPostDto) {
+    const post = await this.prisma.communityPost.create({
+      data: {
+        userId,
+        title: createCommunityPostDto.title.trim(),
+        body: createCommunityPostDto.body.trim(),
+      },
+      include: { user: { select: { fullName: true } } },
+    });
+
+    return {
+      id: post.id,
+      userFullName: post.user.fullName,
+      title: post.title,
+      body: post.body,
+      likes: post.likes,
+      createdAt: post.createdAt,
+    };
+  }
+
   async setEmailVerificationToken(userId: string, token: string, expiresAt: Date) {
     return this.prisma.emailVerificationToken.create({
       data: {
@@ -219,6 +279,53 @@ export class UsersService {
         otpHash: this.hashToken(otp),
         expiresAt,
       },
+    });
+  }
+
+  async createPasswordResetToken(userId: string, token: string, expiresAt: Date) {
+    await this.prisma.passwordResetToken.updateMany({
+      where: { userId, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    return this.prisma.passwordResetToken.create({
+      data: {
+        userId,
+        tokenHash: this.hashToken(token),
+        expiresAt,
+      },
+    });
+  }
+
+  async resetPassword(token: string, password: string) {
+    const resetToken = await this.prisma.passwordResetToken.findFirst({
+      where: {
+        tokenHash: this.hashToken(token),
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      include: { user: true },
+    });
+
+    if (!resetToken) return null;
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const usedAt = new Date();
+    return this.prisma.$transaction(async tx => {
+      await tx.passwordResetToken.update({
+        where: { id: resetToken.id },
+        data: { usedAt },
+      });
+
+      await tx.passwordResetToken.updateMany({
+        where: { userId: resetToken.userId, usedAt: null },
+        data: { usedAt },
+      });
+
+      return tx.user.update({
+        where: { id: resetToken.userId },
+        data: { password: hashedPassword },
+      });
     });
   }
 

@@ -64,3 +64,16 @@ export class CreateSupportTicketDto {
   @IsString()
   message: string;
 }
+
+export class WishlistProductDto {
+  @IsString()
+  productId: string;
+}
+
+export class CreateCommunityPostDto {
+  @IsString()
+  title: string;
+
+  @IsString()
+  body: string;
+}

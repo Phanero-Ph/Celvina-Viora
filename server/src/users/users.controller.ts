@@ -3,7 +3,7 @@ import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminPermissionsDto } from './dto/update-admin-permissions.dto';
-import { CreateSupportTicketDto, UpdateCustomerProfileDto, UpdateNotificationPreferencesDto } from './dto/customer-profile.dto';
+import { CreateCommunityPostDto, CreateSupportTicketDto, UpdateCustomerProfileDto, UpdateNotificationPreferencesDto, WishlistProductDto } from './dto/customer-profile.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -54,6 +54,29 @@ export class UsersController {
   @Post('me/support-tickets')
   createMySupportTicket(@Request() req, @Body() createSupportTicketDto: CreateSupportTicketDto) {
     return this.usersService.createSupportTicket(req.user.id, createSupportTicketDto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me/wishlist')
+  listMyWishlist(@Request() req) {
+    return this.usersService.listWishlist(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('me/wishlist/toggle')
+  toggleMyWishlist(@Request() req, @Body() wishlistProductDto: WishlistProductDto) {
+    return this.usersService.toggleWishlist(req.user.id, wishlistProductDto.productId);
+  }
+
+  @Get('community/posts')
+  listCommunityPosts() {
+    return this.usersService.listCommunityPosts();
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('community/posts')
+  createCommunityPost(@Request() req, @Body() createCommunityPostDto: CreateCommunityPostDto) {
+    return this.usersService.createCommunityPost(req.user.id, createCommunityPostDto);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

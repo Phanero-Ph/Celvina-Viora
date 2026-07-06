@@ -104,3 +104,23 @@ export class ResendVerificationDto {
   @IsNotEmpty()
   email: string;
 }
+
+export class ForgotPasswordDto {
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+}
+
+export class ResetPasswordDto {
+  @IsString()
+  @IsNotEmpty()
+  token: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(8)
+  @Matches(/^(?=.*[A-Za-z])(?=.*\d).+$/, {
+    message: 'password must contain at least one letter and one number',
+  })
+  password: string;
+}

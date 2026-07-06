@@ -60,6 +60,11 @@ const Shell: React.FC = () => {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    if (params.get('resetPassword')) {
+      setAuthMode('login');
+      setAuthOpen(true);
+      return;
+    }
     const token = params.get('verifyEmail')?.trim();
     if (!token) return;
 
@@ -508,6 +513,9 @@ const CustomerDashboard: React.FC = () => {
   const [savedAddresses, setSavedAddresses] = useState<string[]>(currentUser.savedAddresses?.length ? currentUser.savedAddresses : [currentUser.address || 'Lagos, Nigeria']);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<'All' | ProductCategory>('All');
+  const [brandFilter, setBrandFilter] = useState('All');
+  const [colorFilter, setColorFilter] = useState('All');
+  const [sizeFilter, setSizeFilter] = useState('All');
   const [priceLimit, setPriceLimit] = useState(250000);
   const [paymentChannel, setPaymentChannel] = useState('Paystack Checkout');
   const [supportSubject, setSupportSubject] = useState('Order support request');
@@ -525,8 +533,14 @@ const CustomerDashboard: React.FC = () => {
   const filteredProducts = products.filter(product => {
     const matchesSearch = !searchTerm || `${product.name} ${product.vendorName} ${product.description}`.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = categoryFilter === 'All' || product.category === categoryFilter;
-    return matchesSearch && matchesCategory && product.price <= priceLimit;
+    const matchesBrand = brandFilter === 'All' || product.brand === brandFilter;
+    const matchesColor = colorFilter === 'All' || product.color === colorFilter;
+    const matchesSize = sizeFilter === 'All' || product.sizes?.includes(sizeFilter);
+    return matchesSearch && matchesCategory && matchesBrand && matchesColor && matchesSize && product.price <= priceLimit;
   });
+  const brandOptions = ['All', ...Array.from(new Set(products.map(product => product.brand).filter(Boolean)))];
+  const colorOptions = ['All', ...Array.from(new Set(products.map(product => product.color).filter(Boolean)))];
+  const sizeOptions = ['All', ...Array.from(new Set(products.flatMap(product => product.sizes || []).filter(Boolean)))];
   const recommendedProducts = products.filter(product => product.featured || product.seasonalPromo || product.flashSale).slice(0, 4);
   const deliveredOrders = myOrders.filter(order => order.status === 'Delivered' || order.deliveryConfirmed);
   const activeInstallments = myOrders.filter(order => order.paymentPlan !== 'pay_once' && order.amountPaid < order.totalAmount);
@@ -666,10 +680,19 @@ const CustomerDashboard: React.FC = () => {
       {activePage === 'shopping' && (
         <>
           <Panel title="Browse, Search, and Filter Products">
-            <div className="grid gap-3 md:grid-cols-[1fr_180px_180px]">
+            <div className="grid gap-3 md:grid-cols-[1fr_repeat(5,140px)]">
               <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="input" placeholder="Search products, brands, or vendors" />
               <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value as 'All' | ProductCategory)} className="input">
                 {categories.map(category => <option key={category}>{category}</option>)}
+              </select>
+              <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} className="input">
+                {brandOptions.map(brand => <option key={brand}>{brand}</option>)}
+              </select>
+              <select value={colorFilter} onChange={e => setColorFilter(e.target.value)} className="input">
+                {colorOptions.map(color => <option key={color}>{color}</option>)}
+              </select>
+              <select value={sizeFilter} onChange={e => setSizeFilter(e.target.value)} className="input">
+                {sizeOptions.map(size => <option key={size}>{size}</option>)}
               </select>
               <input type="number" value={priceLimit} onChange={e => setPriceLimit(Number(e.target.value))} className="input" placeholder="Max price" />
             </div>
@@ -681,9 +704,9 @@ const CustomerDashboard: React.FC = () => {
                   <img src={product.image} alt={product.name} className="h-20 w-20 rounded-lg object-cover" />
                   <div className="min-w-0 flex-1">
                     <div className="font-black text-sm">{product.name}</div>
-                    <div className="mt-1 text-xs text-gray-500">{product.vendorName} - {product.category}</div>
+                    <div className="mt-1 text-xs text-gray-500">{product.vendorName} - {product.category} - {product.brand}</div>
                     <div className="mt-2 text-sm font-black">{money(product.price)}</div>
-                    <div className="mt-1 text-xs text-gray-500">Rating {product.rating} - {product.reviewCount} reviews</div>
+                    <div className="mt-1 text-xs text-gray-500">Rating {product.rating} - {product.reviewCount} reviews - {product.color} - {(product.sizes || []).join(', ')}</div>
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -1509,8 +1532,8 @@ const AuthModal: React.FC<{
   initialMode: 'login' | 'signup';
   onAuthenticated: (user: User) => void;
 }> = ({ isOpen, onClose, initialMode, onAuthenticated }) => {
-  const { registerUser, loginUser, resendEmailVerification, verifyEmailOtp } = useApp();
-  const [mode, setMode] = useState<'login' | 'signup' | 'otp'>(initialMode);
+  const { registerUser, loginUser, resendEmailVerification, verifyEmailOtp, forgotPassword, resetPassword } = useApp();
+  const [mode, setMode] = useState<'login' | 'signup' | 'otp' | 'forgot' | 'reset'>(initialMode);
   const [role, setRole] = useState<'customer' | 'vendor'>('customer');
   const [fullName, setFullName] = useState('');
   const [businessName, setBusinessName] = useState('');
@@ -1529,6 +1552,7 @@ const AuthModal: React.FC<{
   const [tiktok, setTiktok] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetToken, setResetToken] = useState('');
   const [otp, setOtp] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -1537,7 +1561,13 @@ const AuthModal: React.FC<{
 
   useEffect(() => {
     if (isOpen) {
-      setMode(initialMode);
+      const token = new URLSearchParams(window.location.search).get('resetPassword');
+      if (token) {
+        setResetToken(token);
+        setMode('reset');
+      } else {
+        setMode(initialMode);
+      }
       setError('');
       setSuccess('');
     }
@@ -1545,7 +1575,7 @@ const AuthModal: React.FC<{
 
   if (!isOpen) return null;
 
-  const switchMode = (nextMode: 'login' | 'signup' | 'otp') => {
+  const switchMode = (nextMode: 'login' | 'signup' | 'otp' | 'forgot' | 'reset') => {
     setMode(nextMode);
     setError('');
     setSuccess('');
@@ -1554,7 +1584,14 @@ const AuthModal: React.FC<{
   };
 
   const validateAuth = () => {
+    if (mode === 'reset') {
+      if (!resetToken.trim()) return 'Password reset token is missing.';
+      if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) return 'Password must be at least 8 characters and include a letter and a number.';
+      if (password !== confirmPassword) return 'Passwords do not match.';
+      return '';
+    }
     if (!email.trim()) return 'Enter your email address.';
+    if (mode === 'forgot') return '';
     if (mode === 'otp') {
       if (!/^\d{6}$/.test(otp.trim())) return 'Enter the 6 digit OTP sent to your email.';
       return '';
@@ -1608,6 +1645,16 @@ const AuthModal: React.FC<{
           switchMode('login');
           setSuccess('Email verified. Please log in to continue.');
         }, 900);
+      } else if (mode === 'forgot') {
+        const message = await forgotPassword(email);
+        setSuccess(message);
+      } else if (mode === 'reset') {
+        const message = await resetPassword({ token: resetToken, password });
+        setSuccess(message);
+        setPassword('');
+        setConfirmPassword('');
+        window.history.replaceState({}, document.title, window.location.pathname);
+        setTimeout(() => switchMode('login'), 900);
       } else {
         await registerUser({
           fullName,
@@ -1692,19 +1739,23 @@ const AuthModal: React.FC<{
   };
 
   return (
-    <ModalShell title={mode === 'login' ? 'Log in to Celvina Viora' : mode === 'otp' ? 'Verify your email' : 'Create your Celvina Viora account'} onClose={onClose} width={mode === 'signup' ? 'max-w-xl' : 'max-w-md'}>
+    <ModalShell title={mode === 'login' ? 'Log in to Celvina Viora' : mode === 'otp' ? 'Verify your email' : mode === 'forgot' ? 'Reset your password' : mode === 'reset' ? 'Choose a new password' : 'Create your Celvina Viora account'} onClose={onClose} width={mode === 'signup' ? 'max-w-xl' : 'max-w-md'}>
       <form onSubmit={submitAuth} className="space-y-4">
         <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-black text-gray-900">
             <ShieldCheck size={18} className="text-[#374880]" />
-            {mode === 'login' ? 'Secure marketplace access' : mode === 'otp' ? 'Email verification by OTP' : 'Customer and vendor onboarding'}
+            {mode === 'login' ? 'Secure marketplace access' : mode === 'otp' ? 'Email verification by OTP' : mode === 'forgot' || mode === 'reset' ? 'Password recovery' : 'Customer and vendor onboarding'}
           </div>
           <p className="mt-1 text-xs leading-5 text-gray-500">
             {mode === 'login'
               ? 'Customers, vendors, admins, and super admins use this same login page.'
               : mode === 'otp'
                 ? 'Enter the 6 digit OTP sent to your email address.'
-                : 'Choose customer or vendor registration. Admin and super admin accounts are created by platform management.'}
+                : mode === 'forgot'
+                  ? 'Enter your account email and we will send a secure reset link.'
+                  : mode === 'reset'
+                    ? 'Enter and confirm your new password.'
+                    : 'Choose customer or vendor registration. Admin and super admin accounts are created by platform management.'}
           </p>
         </div>
 
@@ -1744,17 +1795,17 @@ const AuthModal: React.FC<{
           </>
         )}
 
-        {mode !== 'signup' && <input value={email} onChange={e => setEmail(e.target.value)} className="input" placeholder="Email address" type="email" autoComplete="email" />}
+        {mode !== 'signup' && mode !== 'reset' && <input value={email} onChange={e => setEmail(e.target.value)} className="input" placeholder="Email address" type="email" autoComplete="email" />}
         {mode === 'otp' && <input value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} className="input text-center text-2xl font-black tracking-[0.5em]" placeholder="000000" inputMode="numeric" />}
-        {mode !== 'otp' && <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="input" placeholder="Password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />}
+        {mode !== 'otp' && mode !== 'forgot' && <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="input" placeholder={mode === 'reset' ? 'New password' : 'Password'} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />}
 
-        {mode === 'signup' && (
+        {(mode === 'signup' || mode === 'reset') && (
           <>
             <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="input" placeholder="Confirm password" autoComplete="new-password" />
-            <label className="flex items-start gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs leading-5 text-gray-600">
+            {mode === 'signup' && <label className="flex items-start gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs leading-5 text-gray-600">
               <input type="checkbox" checked={acceptedTerms} onChange={e => setAcceptedTerms(e.target.checked)} className="mt-1 accent-[#374880]" />
               <span>I agree to Celvina Viora marketplace terms, wallet rules, refund policy, delivery policy, and installment release conditions.</span>
-            </label>
+            </label>}
           </>
         )}
 
@@ -1763,9 +1814,9 @@ const AuthModal: React.FC<{
             <button type="button" onClick={() => switchMode('signup')} className="text-[#374880] hover:text-[#0A0E2B]">
               Create an account
             </button>
-            <a href={`mailto:celvinaviora@gmail.com?subject=Celvina%20Viora%20password%20help`} className="text-gray-500 hover:text-[#374880]">
+            <button type="button" onClick={() => switchMode('forgot')} className="text-gray-500 hover:text-[#374880]">
               Forgot password?
-            </a>
+            </button>
           </div>
         )}
 
@@ -1779,7 +1830,7 @@ const AuthModal: React.FC<{
         )}
 
         <button type="submit" disabled={isLoading} className="btn-primary w-full disabled:opacity-50">
-          {isLoading ? 'Please wait...' : mode === 'login' ? 'Login' : mode === 'otp' ? 'Verify email' : 'Create account'}
+          {isLoading ? 'Please wait...' : mode === 'login' ? 'Login' : mode === 'otp' ? 'Verify email' : mode === 'forgot' ? 'Send reset link' : mode === 'reset' ? 'Reset password' : 'Create account'}
         </button>
 
         {mode === 'signup' ? (
@@ -1789,9 +1840,9 @@ const AuthModal: React.FC<{
               Sign in
             </button>
           </p>
-        ) : mode === 'otp' ? (
+        ) : mode === 'otp' || mode === 'forgot' || mode === 'reset' ? (
           <p className="text-center text-xs text-gray-500">
-            Already verified?{' '}
+            Ready to sign in?{' '}
             <button type="button" onClick={() => switchMode('login')} className="font-black text-[#374880] hover:text-[#0A0E2B]">
               Return to login
             </button>

@@ -132,6 +132,9 @@ model User {
   voucherRedemptions  VoucherRedemption[]
   emailVerificationTokens EmailVerificationToken[]
   emailVerificationOtps EmailVerificationOtp[]
+  passwordResetTokens PasswordResetToken[]
+  wishlistItems WishlistItem[]
+  communityPosts CommunityPost[]
 }
 
 model EmailVerificationOtp {
@@ -163,6 +166,20 @@ model EmailVerificationToken {
   @@index([expiresAt])
 }
 
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
 model Product {
   id                   String   @id @default(uuid())
   name                 String
@@ -170,6 +187,9 @@ model Product {
   price                Float
   image                String
   description          String
+  brand                String?
+  color                String?
+  sizes                String[]
   inStock              Boolean  @default(true)
   isActive             Boolean  @default(true)
   stockQuantity        Int      @default(0)
@@ -180,6 +200,33 @@ model Product {
   updatedAt            DateTime @updatedAt
 
   orderItems OrderItem[]
+  wishlistItems WishlistItem[]
+}
+
+model WishlistItem {
+  id        String   @id @default(uuid())
+  userId    String
+  productId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@index([userId])
+}
+
+model CommunityPost {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  body      String
+  likes     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Order {

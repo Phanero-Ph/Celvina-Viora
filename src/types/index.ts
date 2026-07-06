@@ -73,6 +73,9 @@ export interface Product {
   price: number;
   image: string;
   description: string;
+  brand?: string;
+  color?: string;
+  sizes?: string[];
   inStock: boolean;
   isActive: boolean;
   stockQuantity: number;

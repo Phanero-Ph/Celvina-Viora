@@ -84,6 +84,29 @@ export class EmailService {
     });
   }
 
+  async sendPasswordResetEmail(input: { to: string; fullName: string; resetUrl: string }) {
+    const subject = 'Reset your Celvina Viora password';
+    const html = `
+      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#1f2937">
+        <h2 style="color:#374880">Reset your Celvina Viora password</h2>
+        <p>Hello ${input.fullName},</p>
+        <p>Use the button below to reset your password. This link expires in 30 minutes.</p>
+        <p>
+          <a href="${input.resetUrl}" style="display:inline-block;background:#374880;color:white;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold">
+            Reset Password
+          </a>
+        </p>
+        <p>If you did not request this, you can safely ignore this email.</p>
+      </div>
+    `;
+
+    return this.sendMail({
+      to: input.to,
+      subject,
+      html,
+    });
+  }
+
   private async sendMail(input: { to: string; subject: string; html: string }) {
     const smtpHost = this.configService.get<string>('SMTP_HOST', 'smtp.gmail.com');
     const smtpPort = Number(this.configService.get<string>('SMTP_PORT', '465'));

@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import * as bcrypt from 'bcrypt';
-import { RegisterDto, LoginDto, ResendVerificationDto, VerifyEmailDto, VerifyEmailOtpDto } from './dto/auth.dto';
+import { ForgotPasswordDto, RegisterDto, LoginDto, ResendVerificationDto, ResetPasswordDto, VerifyEmailDto, VerifyEmailOtpDto } from './dto/auth.dto';
 import { User, UserRole } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { ConfigService } from '@nestjs/config';
@@ -112,6 +112,36 @@ export class AuthService {
         ? 'Verification OTP sent. Please check your inbox.'
         : 'Email delivery is not configured, so the OTP was logged on the server.',
     };
+  }
+
+  async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
+    const user = await this.usersService.findByEmail(forgotPasswordDto.email);
+    if (!user) {
+      return { message: 'If an account exists, a password reset email has been sent.' };
+    }
+
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    await this.usersService.createPasswordResetToken(user.id, token, expiresAt);
+
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL', 'http://127.0.0.1:5173');
+    const resetUrl = `${frontendUrl.replace(/\/$/, '')}/?resetPassword=${token}`;
+    await this.emailService.sendPasswordResetEmail({
+      to: user.email,
+      fullName: user.fullName,
+      resetUrl,
+    });
+
+    return { message: 'If an account exists, a password reset email has been sent.' };
+  }
+
+  async resetPassword(resetPasswordDto: ResetPasswordDto) {
+    const user = await this.usersService.resetPassword(resetPasswordDto.token, resetPasswordDto.password);
+    if (!user) {
+      throw new BadRequestException('Password reset link is invalid or has expired.');
+    }
+
+    return { message: 'Password reset successfully. You can now log in.' };
   }
 
   me(user: User) {
