@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { ProductsModule } from './products/products.module';
 import { OrdersModule } from './orders/orders.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { AdsModule } from './ads/ads.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { UploadsModule } from './uploads/uploads.module';
     ProductsModule,
     OrdersModule,
     UploadsModule,
+    AdsModule,
   ],
   controllers: [],
   providers: [],

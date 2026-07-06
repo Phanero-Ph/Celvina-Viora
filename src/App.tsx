@@ -933,7 +933,7 @@ const CustomerDashboard: React.FC = () => {
 };
 
 const VendorDashboard: React.FC = () => {
-  const { currentUser, vendorProfiles, products, orders, vendorAds, settings, vendorAddProduct, vendorCreateAd, vendorWithdraw, uploadImage } = useApp();
+  const { currentUser, vendorProfiles, products, orders, vendorAds, settings, vendorAddProduct, vendorCreateAd, loadVendorAds, vendorWithdraw, uploadImage } = useApp();
   const [activePage, setActivePage] = useState<'overview' | 'products' | 'sales' | 'advertising' | 'moneyBox' | 'analytics'>('overview');
   const vendor = vendorProfiles.find(item => item.userId === currentUser.id);
   const vendorOwnerIds = [vendor?.id, currentUser.id].filter(Boolean);
@@ -977,6 +977,17 @@ const VendorDashboard: React.FC = () => {
       setNotice('Unable to upload product image right now.');
     }
   };
+
+  const createAd = async (productId: string, placement: VendorAd['placement'], days: 1 | 2) => {
+    const result = await vendorCreateAd(productId, placement, days);
+    setNotice(result.message);
+  };
+
+  useEffect(() => {
+    if (activePage === 'advertising') {
+      loadVendorAds().catch(() => setNotice('Unable to load advertisements right now.'));
+    }
+  }, [activePage]);
 
   return (
     <DashboardSidebarFrame
@@ -1028,7 +1039,7 @@ const VendorDashboard: React.FC = () => {
               <div className="text-xs text-gray-500 mt-1">{money(product.price)} • Stock {product.stockQuantity}</div>
               <div className={activePage === 'advertising' ? 'flex flex-wrap gap-2 mt-3' : 'hidden'}>
                 {(['Homepage placement', 'Sponsored products', 'Featured products'] as VendorAd['placement'][]).map(placement => (
-                  <button key={placement} onClick={() => vendorCreateAd(product.id, placement, placement === 'Homepage placement' ? 2 : 1)} className="btn-light">{placement}</button>
+                  <button key={placement} onClick={() => createAd(product.id, placement, placement === 'Homepage placement' ? 2 : 1)} className="btn-light">{placement}</button>
                 ))}
               </div>
             </div>
@@ -1152,7 +1163,7 @@ const normalizeAdminPermissionsForEditing = (permissions: string[] = []) => Arra
 ));
 
 const AdminDashboard: React.FC = () => {
-  const { currentUser, users, products, orders, refunds, vendorProfiles, vendorAds, affiliateRecords, settings } = useApp();
+  const { currentUser, users, products, orders, refunds, vendorProfiles, vendorAds, affiliateRecords, settings, loadVendorAds } = useApp();
   const [activePage, setActivePage] = useState<AdminPage>('overview');
   const gross = orders.reduce((sum, order) => sum + order.totalAmount, 0);
   const fees = orders.reduce((sum, order) => sum + order.items.reduce((itemSum, item) => itemSum + item.quantity * (settings.platformFeePerProduct + settings.maintenanceFeePerProduct), 0), 0);
@@ -1178,6 +1189,12 @@ const AdminDashboard: React.FC = () => {
   useEffect(() => {
     if (!canOpenPage(activePage)) setActivePage('overview');
   }, [activePage, assignedPermissions.join('|')]);
+
+  useEffect(() => {
+    if (activePage === 'ads' || activePage === 'overview' || activePage === 'analytics') {
+      loadVendorAds().catch(() => undefined);
+    }
+  }, [activePage]);
 
   return (
     <DashboardSidebarFrame
@@ -1231,7 +1248,7 @@ const AdminDashboard: React.FC = () => {
 };
 
 const SuperAdminDashboard: React.FC = () => {
-  const { users, products, orders, refunds, vendorProfiles, vendorAds, affiliateRecords, settings, createAdminUser, updateAdminPermissions } = useApp();
+  const { users, products, orders, refunds, vendorProfiles, vendorAds, affiliateRecords, settings, createAdminUser, updateAdminPermissions, loadVendorAds } = useApp();
   const [fullName, setFullName] = useState('New Celvina Viora Admin');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('+234');
@@ -1248,6 +1265,12 @@ const SuperAdminDashboard: React.FC = () => {
   const admins = users.filter(user => user.role === 'admin' || user.role === 'super_admin');
   const gross = orders.reduce((sum, order) => sum + order.totalAmount, 0);
   const fees = orders.reduce((sum, order) => sum + order.items.reduce((itemSum, item) => itemSum + item.quantity * (settings.platformFeePerProduct + settings.maintenanceFeePerProduct), 0), 0);
+
+  useEffect(() => {
+    if (activePage === 'ads' || activePage === 'overview' || activePage === 'operations' || activePage === 'analytics') {
+      loadVendorAds().catch(() => undefined);
+    }
+  }, [activePage]);
 
   const togglePermission = (permission: string) => {
     setPermissions(prev => prev.includes(permission)

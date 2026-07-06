@@ -89,7 +89,8 @@ interface AppContextType {
   addReview: (productId: string, rating: number, comment: string) => void;
   markNotificationRead: (id: string) => void;
   vendorAddProduct: (product: Omit<Product, 'id' | 'vendorName' | 'source' | 'rating' | 'reviewCount'>) => Promise<Product | void>;
-  vendorCreateAd: (productId: string, placement: VendorAd['placement'], days: 1 | 2) => void;
+  vendorCreateAd: (productId: string, placement: VendorAd['placement'], days: 1 | 2) => Promise<{ success: boolean; message: string }>;
+  loadVendorAds: () => Promise<VendorAd[]>;
   vendorWithdraw: (amount: number) => Promise<{ success: boolean; message: string }>;
   addCommunityPost: (title: string, body: string) => Promise<CommunityPost | void>;
   loadCommunityPosts: () => Promise<CommunityPost[]>;
@@ -305,6 +306,17 @@ const adaptApiRefund = (apiRefund: any): RefundRequest => ({
   reason: apiRefund.reason || '',
   status: apiRefund.status === 'Approved' ? 'Approved' : apiRefund.status === 'Rejected' ? 'Rejected' : 'Pending',
   createdAt: apiRefund.createdAt || new Date().toISOString(),
+});
+
+const adaptApiVendorAd = (apiAd: any): VendorAd => ({
+  id: apiAd.id,
+  vendorId: apiAd.vendorId,
+  productId: apiAd.productId,
+  placement: apiAd.placement,
+  days: Number(apiAd.days || 1) as 1 | 2,
+  cost: Number(apiAd.cost || 0),
+  status: apiAd.status === 'Expired' ? 'Expired' : 'Active',
+  createdAt: apiAd.createdAt || new Date().toISOString(),
 });
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -1004,10 +1016,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return createdProduct;
   };
 
-  const vendorCreateAd = (productId: string, placement: VendorAd['placement'], days: 1 | 2) => {
+  const loadVendorAds = async () => {
+    const response = await apiClient.get(currentUser.role === 'admin' || currentUser.role === 'super_admin' ? '/ads/admin/all' : '/ads/vendor/mine');
+    const nextAds = response.data.map(adaptApiVendorAd);
+    setVendorAds(prev => {
+      const currentUserAdVendorIds = new Set(nextAds.map(ad => ad.vendorId));
+      const otherAds = prev.filter(ad => !currentUserAdVendorIds.has(ad.vendorId));
+      return [...nextAds, ...otherAds];
+    });
+    return nextAds;
+  };
+
+  const vendorCreateAd = async (productId: string, placement: VendorAd['placement'], days: 1 | 2) => {
     const vendor = vendorProfiles.find(item => item.userId === currentUser.id);
-    if (!vendor) return;
+    if (!vendor) return { success: false, message: 'Vendor profile not found.' };
     const cost = days === 1 ? PLATFORM_SETTINGS.adOneDayCost : PLATFORM_SETTINGS.adTwoDayCost;
+    if (isAuthenticated) {
+      try {
+        const response = await apiClient.post('/ads/vendor', { productId, placement, days });
+        const ad = adaptApiVendorAd(response.data);
+        setVendorAds(prev => [ad, ...prev.filter(item => item.id !== ad.id)]);
+        setProducts(prev => prev.map(product => product.id === productId ? { ...product, sponsored: placement !== 'Featured products', featured: placement === 'Featured products' } : product));
+        await loadWalletTransactions().catch(() => undefined);
+        await loadNotifications().catch(() => undefined);
+        return { success: true, message: 'Advertisement activated.' };
+      } catch (error: any) {
+        return { success: false, message: error.response?.data?.message || 'Unable to activate advertisement right now.' };
+      }
+    }
+
     setVendorAds(prev => [{
       id: makeId('ad'),
       vendorId: vendor.id,
@@ -1020,6 +1057,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, ...prev]);
     setVendorProfiles(prev => prev.map(item => item.id === vendor.id ? { ...item, activeAds: item.activeAds + 1 } : item));
     setProducts(prev => prev.map(product => product.id === productId ? { ...product, sponsored: placement !== 'Featured products', featured: placement === 'Featured products' } : product));
+    return { success: true, message: 'Advertisement activated.' };
   };
 
   const vendorWithdraw = async (amount: number) => {
@@ -1148,6 +1186,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     markNotificationRead,
     vendorAddProduct,
     vendorCreateAd,
+    loadVendorAds,
     vendorWithdraw,
     addCommunityPost,
     loadCommunityPosts,

@@ -211,6 +211,27 @@ model Product {
 
   orderItems OrderItem[]
   wishlistItems WishlistItem[]
+  vendorAdvertisements VendorAdvertisement[]
+}
+
+model VendorAdvertisement {
+  id        String   @id @default(uuid())
+  vendorId  String
+  productId String
+  placement String
+  days      Int
+  cost      Float
+  status    String   @default("Active")
+  startsAt  DateTime @default(now())
+  endsAt    DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId])
+  @@index([productId])
+  @@index([status])
 }
 
 model WishlistItem {
