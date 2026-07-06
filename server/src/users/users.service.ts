@@ -218,6 +218,120 @@ export class UsersService {
     };
   }
 
+  async listWalletTransactions(userId: string) {
+    return this.prisma.walletTransaction.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async fundWallet(userId: string, amount: number) {
+    const cleanAmount = Number(amount);
+    if (!Number.isFinite(cleanAmount) || cleanAmount <= 0) {
+      throw new BadRequestException('Enter a valid wallet funding amount');
+    }
+
+    return this.prisma.$transaction(async tx => {
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: { walletBalance: { increment: cleanAmount } },
+      });
+
+      const transaction = await tx.walletTransaction.create({
+        data: {
+          userId,
+          type: 'Funding',
+          amount: cleanAmount,
+          status: 'Completed',
+          note: 'Wallet funding completed.',
+          reference: `CV-FUND-${Date.now()}-${userId.slice(0, 8)}`,
+        },
+      });
+
+      const notification = await tx.notification.create({
+        data: {
+          userId,
+          title: 'Wallet funded',
+          message: `Your wallet has been credited with ₦${cleanAmount.toLocaleString()}.`,
+          channel: 'In App',
+          type: 'success',
+        },
+      });
+
+      const { password, emailVerificationTokenHash, emailVerificationExpiresAt, ...safeUser } = user;
+      return { user: safeUser, transaction, notification };
+    });
+  }
+
+  async withdrawWallet(userId: string, amount: number) {
+    const cleanAmount = Number(amount);
+    if (!Number.isFinite(cleanAmount) || cleanAmount <= 0) {
+      throw new BadRequestException('Enter a valid withdrawal amount');
+    }
+
+    return this.prisma.$transaction(async tx => {
+      const currentUser = await tx.user.findUnique({ where: { id: userId } });
+      if (!currentUser) {
+        throw new NotFoundException('User not found');
+      }
+
+      if (currentUser.walletBalance < cleanAmount) {
+        throw new BadRequestException('Insufficient eligible wallet balance.');
+      }
+
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: { walletBalance: { decrement: cleanAmount } },
+      });
+
+      const transaction = await tx.walletTransaction.create({
+        data: {
+          userId,
+          type: 'Withdrawal',
+          amount: cleanAmount,
+          status: 'Completed',
+          note: 'Wallet withdrawal requested to saved bank account.',
+          reference: `CV-WITHDRAW-${Date.now()}-${userId.slice(0, 8)}`,
+        },
+      });
+
+      const notification = await tx.notification.create({
+        data: {
+          userId,
+          title: 'Wallet withdrawal',
+          message: `Your withdrawal request for ₦${cleanAmount.toLocaleString()} has been completed.`,
+          channel: 'In App',
+          type: 'success',
+        },
+      });
+
+      const { password, emailVerificationTokenHash, emailVerificationExpiresAt, ...safeUser } = user;
+      return { user: safeUser, transaction, notification };
+    });
+  }
+
+  async listNotifications(userId: string) {
+    return this.prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async markNotificationRead(userId: string, notificationId: string) {
+    const notification = await this.prisma.notification.findFirst({
+      where: { id: notificationId, userId },
+    });
+
+    if (!notification) {
+      throw new NotFoundException('Notification not found');
+    }
+
+    return this.prisma.notification.update({
+      where: { id: notificationId },
+      data: { read: true },
+    });
+  }
+
   async setEmailVerificationToken(userId: string, token: string, expiresAt: Date) {
     return this.prisma.emailVerificationToken.create({
       data: {

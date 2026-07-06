@@ -494,6 +494,8 @@ const CustomerDashboard: React.FC = () => {
     toggleWishlist,
     addCommunityPost,
     markNotificationRead,
+    loadWalletTransactions,
+    loadNotifications,
     updateCustomerProfile,
     updateNotificationPreferences,
     loadSupportTickets,
@@ -547,8 +549,13 @@ const CustomerDashboard: React.FC = () => {
   const referralEarnings = myTransactions.filter(txn => txn.type === 'Referral Reward').reduce((sum, txn) => sum + txn.amount, 0);
   const affiliateEarnings = myTransactions.filter(txn => txn.type === 'Affiliate Commission').reduce((sum, txn) => sum + txn.amount, 0);
 
-  const handleWithdraw = () => {
-    const result = withdrawWallet(Number(withdrawAmount));
+  const handleWithdraw = async () => {
+    const result = await withdrawWallet(Number(withdrawAmount));
+    setNotice(result.message);
+  };
+
+  const handleFundWallet = async () => {
+    const result = await fundWallet(Number(fundAmount));
     setNotice(result.message);
   };
 
@@ -603,6 +610,12 @@ const CustomerDashboard: React.FC = () => {
   useEffect(() => {
     if (activePage === 'support') {
       loadSupportTickets().catch(() => setNotice('Unable to load support tickets right now.'));
+    }
+    if (activePage === 'wallet' || activePage === 'payments') {
+      loadWalletTransactions().catch(() => setNotice('Unable to load wallet transactions right now.'));
+    }
+    if (activePage === 'notifications' || activePage === 'overview') {
+      loadNotifications().catch(() => undefined);
     }
   }, [activePage]);
 
@@ -754,7 +767,7 @@ const CustomerDashboard: React.FC = () => {
           <Panel title="Customer Wallet">
             <div className="grid sm:grid-cols-2 gap-3">
               <input type="number" value={fundAmount} onChange={e => setFundAmount(e.target.value)} className="input" />
-              <button onClick={() => { fundWallet(Number(fundAmount)); setNotice('Wallet funded successfully.'); }} className="btn-primary">Add money</button>
+              <button onClick={handleFundWallet} className="btn-primary">Add money</button>
               <input type="number" value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} className="input" />
               <button onClick={handleWithdraw} className="btn-dark">Withdraw eligible balance</button>
             </div>

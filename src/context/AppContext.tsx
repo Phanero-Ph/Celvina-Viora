@@ -78,8 +78,10 @@ interface AppContextType {
   payNextInstallment: (orderId: string) => void;
   confirmDelivery: (orderId: string) => void;
   requestRefund: (orderId: string, reason: string) => void;
-  fundWallet: (amount: number) => void;
-  withdrawWallet: (amount: number) => { success: boolean; message: string };
+  fundWallet: (amount: number) => Promise<{ success: boolean; message: string }>;
+  withdrawWallet: (amount: number) => Promise<{ success: boolean; message: string }>;
+  loadWalletTransactions: () => Promise<WalletTransaction[]>;
+  loadNotifications: () => Promise<AppNotification[]>;
   addReview: (productId: string, rating: number, comment: string) => void;
   markNotificationRead: (id: string) => void;
   vendorAddProduct: (product: Omit<Product, 'id' | 'vendorName' | 'source' | 'rating' | 'reviewCount'>) => void;
@@ -181,6 +183,26 @@ const adaptApiUser = (apiUser: any): User => ({
   walletBalance: Number(apiUser.walletBalance || 0),
   vendorMoneyBox: apiUser.role === 'VENDOR' ? 0 : undefined,
   createdAt: apiUser.createdAt || new Date().toISOString(),
+});
+
+const adaptApiWalletTransaction = (txn: any): WalletTransaction => ({
+  id: txn.id,
+  userId: txn.userId,
+  type: txn.type,
+  amount: Number(txn.amount || 0),
+  status: txn.status || 'Completed',
+  note: txn.note || '',
+  createdAt: txn.createdAt || new Date().toISOString(),
+});
+
+const adaptApiNotification = (notification: any): AppNotification => ({
+  id: notification.id,
+  userId: notification.userId,
+  title: notification.title,
+  message: notification.message,
+  type: notification.type === 'danger' ? 'warning' : notification.type || 'info',
+  createdAt: notification.createdAt || new Date().toISOString(),
+  read: Boolean(notification.read),
 });
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -602,8 +624,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, ...prev]);
   };
 
-  const fundWallet = (amount: number) => {
-    if (amount <= 0) return;
+  const fundWallet = async (amount: number) => {
+    if (amount <= 0) return { success: false, message: 'Enter a valid wallet funding amount.' };
+    if (isAuthenticated) {
+      try {
+        const response = await apiClient.post('/users/me/wallet/fund', { amount });
+        const updatedUser = adaptApiUser(response.data.user);
+        const transaction = adaptApiWalletTransaction(response.data.transaction);
+        const notification = adaptApiNotification(response.data.notification);
+        setUsers(prev => prev.map(user => user.id === updatedUser.id ? { ...user, ...updatedUser } : user));
+        setWalletTransactions(prev => [transaction, ...prev.filter(item => item.id !== transaction.id)]);
+        setNotifications(prev => [notification, ...prev.filter(item => item.id !== notification.id)]);
+        return { success: true, message: 'Wallet funded successfully.' };
+      } catch (error: any) {
+        return { success: false, message: error.response?.data?.message || 'Unable to fund wallet right now.' };
+      }
+    }
+
     setUsers(prev => prev.map(user => user.id === currentUser.id ? { ...user, walletBalance: user.walletBalance + amount } : user));
     setWalletTransactions(prev => [{
       id: makeId('txn'),
@@ -614,10 +651,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       note: 'Wallet funding completed.',
       createdAt: new Date().toISOString(),
     }, ...prev]);
+    notify(currentUser.id, 'Wallet funded', `Your wallet has been credited with ₦${amount.toLocaleString()}.`, 'success');
+    return { success: true, message: 'Wallet funded successfully.' };
   };
 
-  const withdrawWallet = (amount: number) => {
+  const withdrawWallet = async (amount: number) => {
     if (amount <= 0 || amount > currentUser.walletBalance) return { success: false, message: 'Insufficient eligible wallet balance.' };
+    if (isAuthenticated) {
+      try {
+        const response = await apiClient.post('/users/me/wallet/withdraw', { amount });
+        const updatedUser = adaptApiUser(response.data.user);
+        const transaction = adaptApiWalletTransaction(response.data.transaction);
+        const notification = adaptApiNotification(response.data.notification);
+        setUsers(prev => prev.map(user => user.id === updatedUser.id ? { ...user, ...updatedUser } : user));
+        setWalletTransactions(prev => [transaction, ...prev.filter(item => item.id !== transaction.id)]);
+        setNotifications(prev => [notification, ...prev.filter(item => item.id !== notification.id)]);
+        return { success: true, message: 'Withdrawal request completed.' };
+      } catch (error: any) {
+        return { success: false, message: error.response?.data?.message || 'Unable to withdraw wallet balance right now.' };
+      }
+    }
+
     setUsers(prev => prev.map(user => user.id === currentUser.id ? { ...user, walletBalance: user.walletBalance - amount } : user));
     setWalletTransactions(prev => [{
       id: makeId('txn'),
@@ -628,7 +682,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       note: 'Wallet withdrawal requested to saved bank account.',
       createdAt: new Date().toISOString(),
     }, ...prev]);
+    notify(currentUser.id, 'Wallet withdrawal', `Your withdrawal request for ₦${amount.toLocaleString()} has been completed.`, 'success');
     return { success: true, message: 'Withdrawal request completed.' };
+  };
+
+  const loadWalletTransactions = async () => {
+    const response = await apiClient.get('/users/me/wallet-transactions');
+    const transactions = response.data.map(adaptApiWalletTransaction);
+    setWalletTransactions(prev => {
+      const otherUsers = prev.filter(txn => txn.userId !== currentUser.id);
+      return [...transactions, ...otherUsers];
+    });
+    return transactions;
+  };
+
+  const loadNotifications = async () => {
+    const response = await apiClient.get('/users/me/notifications');
+    const nextNotifications = response.data.map(adaptApiNotification);
+    setNotifications(prev => {
+      const otherUsers = prev.filter(notification => notification.userId !== currentUser.id);
+      return [...nextNotifications, ...otherUsers];
+    });
+    return nextNotifications;
   };
 
   const addReview = (productId: string, rating: number, comment: string) => {
@@ -650,6 +725,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const markNotificationRead = (id: string) => {
     setNotifications(prev => prev.map(item => item.id === id ? { ...item, read: true } : item));
+    if (isAuthenticated) {
+      apiClient.patch(`/users/me/notifications/${id}/read`).catch(() => undefined);
+    }
   };
 
   const vendorAddProduct = (product: Omit<Product, 'id' | 'vendorName' | 'source' | 'rating' | 'reviewCount'>) => {
@@ -781,6 +859,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     requestRefund,
     fundWallet,
     withdrawWallet,
+    loadWalletTransactions,
+    loadNotifications,
     addReview,
     markNotificationRead,
     vendorAddProduct,

@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsObject, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsBoolean, IsNumber, IsObject, IsOptional, IsString, Min } from 'class-validator';
 
 export class UpdateCustomerProfileDto {
   @IsString()
@@ -76,4 +76,10 @@ export class CreateCommunityPostDto {
 
   @IsString()
   body: string;
+}
+
+export class WalletAmountDto {
+  @IsNumber()
+  @Min(1)
+  amount: number;
 }
