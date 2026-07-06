@@ -469,89 +469,365 @@ const ProductCard: React.FC<{ product: Product; saved: boolean; onWishlist: () =
 );
 
 const CustomerDashboard: React.FC = () => {
-  const { currentUser, orders, wishlist, products, walletTransactions, refunds, notifications, fundWallet, withdrawWallet, payNextInstallment, confirmDelivery, requestRefund, addReview, settings } = useApp();
+  const {
+    currentUser,
+    orders,
+    wishlist,
+    products,
+    walletTransactions,
+    refunds,
+    notifications,
+    communityPosts,
+    fundWallet,
+    withdrawWallet,
+    payNextInstallment,
+    confirmDelivery,
+    requestRefund,
+    addReview,
+    addToCart,
+    toggleWishlist,
+    addCommunityPost,
+    markNotificationRead,
+    settings,
+  } = useApp();
+  const [activePage, setActivePage] = useState<'overview' | 'profile' | 'shopping' | 'payments' | 'wallet' | 'delivery' | 'support' | 'community' | 'rewards' | 'notifications'>('overview');
   const [fundAmount, setFundAmount] = useState('10000');
   const [withdrawAmount, setWithdrawAmount] = useState('5000');
   const [refundReason, setRefundReason] = useState('Approved cancellation request');
   const [notice, setNotice] = useState('');
+  const [profileName, setProfileName] = useState(currentUser.fullName);
+  const [profilePhone, setProfilePhone] = useState(currentUser.phone);
+  const [profileWhatsapp, setProfileWhatsapp] = useState(currentUser.whatsappNumber || currentUser.phone);
+  const [profileAvatar, setProfileAvatar] = useState(currentUser.avatar || '');
+  const [newAddress, setNewAddress] = useState(currentUser.address || 'Lagos, Nigeria');
+  const [savedAddresses, setSavedAddresses] = useState<string[]>([currentUser.address || 'Lagos, Nigeria']);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<'All' | ProductCategory>('All');
+  const [priceLimit, setPriceLimit] = useState(250000);
+  const [paymentChannel, setPaymentChannel] = useState('Paystack Checkout');
+  const [supportSubject, setSupportSubject] = useState('Order support request');
+  const [supportBody, setSupportBody] = useState('I need help with my order, delivery, payment, refund, or return.');
+  const [supportTickets, setSupportTickets] = useState<Array<{ id: string; subject: string; status: string }>>([]);
+  const [communityTitle, setCommunityTitle] = useState('My style inspiration');
+  const [communityBody, setCommunityBody] = useState('Share an outfit idea, styling question, or fashion experience.');
+  const [promoCode, setPromoCode] = useState('CELVINA10');
+  const [preferences, setPreferences] = useState({ email: true, whatsapp: true, push: true, orders: true, payments: true, promotions: false });
+
   const myOrders = orders.filter(order => order.userId === currentUser.id);
   const myTransactions = walletTransactions.filter(txn => txn.userId === currentUser.id);
   const myRefunds = refunds.filter(refund => refund.userId === currentUser.id);
+  const myNotifications = notifications.filter(item => item.userId === currentUser.id);
   const savedProducts = products.filter(product => wishlist.includes(product.id));
+  const filteredProducts = products.filter(product => {
+    const matchesSearch = !searchTerm || `${product.name} ${product.vendorName} ${product.description}`.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = categoryFilter === 'All' || product.category === categoryFilter;
+    return matchesSearch && matchesCategory && product.price <= priceLimit;
+  });
+  const recommendedProducts = products.filter(product => product.featured || product.seasonalPromo || product.flashSale).slice(0, 4);
+  const deliveredOrders = myOrders.filter(order => order.status === 'Delivered' || order.deliveryConfirmed);
+  const activeInstallments = myOrders.filter(order => order.paymentPlan !== 'pay_once' && order.amountPaid < order.totalAmount);
+  const referralEarnings = myTransactions.filter(txn => txn.type === 'Referral Reward').reduce((sum, txn) => sum + txn.amount, 0);
+  const affiliateEarnings = myTransactions.filter(txn => txn.type === 'Affiliate Commission').reduce((sum, txn) => sum + txn.amount, 0);
 
   const handleWithdraw = () => {
     const result = withdrawWallet(Number(withdrawAmount));
     setNotice(result.message);
   };
 
+  const handleProfilePhotoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setProfileAvatar(String(reader.result));
+    reader.readAsDataURL(file);
+  };
+
+  const saveAddress = () => {
+    if (!newAddress.trim()) return;
+    setSavedAddresses(prev => prev.includes(newAddress.trim()) ? prev : [newAddress.trim(), ...prev]);
+    setNotice('Delivery address saved.');
+  };
+
+  const submitSupportTicket = (type: 'Support' | 'Complaint' | 'Return') => {
+    setSupportTickets(prev => [{ id: `TCK-${Math.floor(1000 + Math.random() * 9000)}`, subject: `${type}: ${supportSubject}`, status: 'Open' }, ...prev]);
+    setNotice(`${type} ticket submitted. Customer support will respond by email.`);
+  };
+
+  const buyNow = (product: Product) => {
+    addToCart(product, 1);
+    setNotice(`${product.name} is ready for checkout. Open cart to complete payment.`);
+  };
+
   return (
-    <DashboardFrame title="Customer Dashboard" subtitle="Orders, wallet, wishlist, refunds, reviews, referrals, and delivery confirmation.">
-      <div className="grid md:grid-cols-4 gap-4">
-        <Metric label="Wallet balance" value={money(currentUser.walletBalance)} icon={<Wallet size={18} />} />
-        <Metric label="Referral link" value={currentUser.referralCode || 'Pending'} icon={<UserPlus size={18} />} />
-        <Metric label="Wishlist" value={`${wishlist.length} saved`} icon={<Heart size={18} />} />
-        <Metric label="Delivery fee" value={money(settings.deliveryFee)} icon={<Truck size={18} />} />
-      </div>
+    <DashboardSidebarFrame
+      title="Customer Dashboard"
+      subtitle="Profile, shopping, payments, wallet, delivery, support, rewards, and notification preferences."
+      active={activePage}
+      onChange={setActivePage}
+      items={[
+        { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={17} /> },
+        { id: 'profile', label: 'Profile', icon: <UserIcon size={17} /> },
+        { id: 'shopping', label: 'Shopping', icon: <ShoppingBag size={17} /> },
+        { id: 'payments', label: 'Payments', icon: <CreditCard size={17} /> },
+        { id: 'wallet', label: 'Wallet', icon: <Wallet size={17} /> },
+        { id: 'delivery', label: 'Delivery', icon: <Truck size={17} /> },
+        { id: 'support', label: 'Support', icon: <MessageCircle size={17} /> },
+        { id: 'community', label: 'Community', icon: <Sparkles size={17} /> },
+        { id: 'rewards', label: 'Rewards', icon: <Award size={17} /> },
+        { id: 'notifications', label: 'Notifications', icon: <Bell size={17} /> },
+      ]}
+    >
+      {notice && <div className="rounded-lg border border-[#374880]/20 bg-[#374880]/5 px-4 py-3 text-sm font-bold text-[#374880]">{notice}</div>}
 
-      <TwoColumn>
-        <Panel title="Wallet">
-          <div className="grid sm:grid-cols-2 gap-3">
-            <input type="number" value={fundAmount} onChange={e => setFundAmount(e.target.value)} className="input" />
-            <button onClick={() => fundWallet(Number(fundAmount))} className="btn-primary">Fund wallet</button>
-            <input type="number" value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} className="input" />
-            <button onClick={handleWithdraw} className="btn-dark">Withdraw eligible balance</button>
+      {activePage === 'overview' && (
+        <>
+          <div className="grid md:grid-cols-4 gap-4">
+            <Metric label="Wallet balance" value={money(currentUser.walletBalance)} icon={<Wallet size={18} />} />
+            <Metric label="Active orders" value={`${myOrders.length}`} icon={<ShoppingBag size={18} />} />
+            <Metric label="Wishlist" value={`${wishlist.length} saved`} icon={<Heart size={18} />} />
+            <Metric label="Installments" value={`${activeInstallments.length} active`} icon={<Clock size={18} />} />
           </div>
-          {notice && <p className="mt-3 text-xs font-bold text-[#374880]">{notice}</p>}
-          <List items={myTransactions.slice(0, 4)} render={txn => <span>{txn.type}: <strong>{money(txn.amount)}</strong> • {txn.note}</span>} empty="No wallet transactions yet." />
-        </Panel>
+          <TwoColumn>
+            <Panel title="Recommended For You">
+              <List items={recommendedProducts} render={product => <span>{product.name} - {money(product.price)} - {product.category}</span>} empty="No recommendations yet." />
+            </Panel>
+            <Panel title="Recent Notifications">
+              <List items={myNotifications.slice(0, 5)} render={item => <span><strong>{item.title}</strong> - {item.message}</span>} empty="No notifications." />
+            </Panel>
+          </TwoColumn>
+        </>
+      )}
 
-        <Panel title="Notifications">
-          <List items={notifications.filter(item => item.userId === currentUser.id).slice(0, 5)} render={item => <span><strong>{item.title}</strong> — {item.message}</span>} empty="No notifications." />
-        </Panel>
-      </TwoColumn>
-
-      <Panel title="Orders">
-        <div className="space-y-4">
-          {myOrders.map(order => (
-            <div key={order.id} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                <div>
-                  <div className="font-black">{order.id} • {order.status}</div>
-                  <div className="text-xs text-gray-500 mt-1">{order.paymentPlan.replace('_', ' ')} • Paid {money(order.amountPaid)} of {money(order.totalAmount)} • Products release after full payment</div>
+      {activePage === 'profile' && (
+        <TwoColumn>
+          <Panel title="Profile Management">
+            <div className="grid gap-3">
+              <div className="flex items-center gap-4">
+                <div className="h-20 w-20 overflow-hidden rounded-lg border border-gray-200 bg-gray-100">
+                  {profileAvatar ? <img src={profileAvatar} alt="Profile" className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-xs font-black text-gray-400">PHOTO</div>}
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {order.status === 'Installment Active' && <button onClick={() => payNextInstallment(order.id)} className="btn-primary">Pay next installment</button>}
-                  {order.status === 'Processing Delivery' && <button onClick={() => confirmDelivery(order.id)} className="btn-dark">Confirm delivery</button>}
-                  {!order.refundRequested && order.status !== 'Delivered' && <button onClick={() => requestRefund(order.id, refundReason)} className="btn-light">Request refund</button>}
+                <label className="btn-light cursor-pointer">
+                  Upload photo
+                  <input type="file" accept="image/*" onChange={handleProfilePhotoUpload} className="hidden" />
+                </label>
+              </div>
+              <input value={profileName} onChange={e => setProfileName(e.target.value)} className="input" placeholder="Full name" />
+              <input value={currentUser.email} className="input bg-gray-50" disabled placeholder="Email address" />
+              <input value={profilePhone} onChange={e => setProfilePhone(e.target.value)} className="input" placeholder="Phone number" />
+              <input value={profileWhatsapp} onChange={e => setProfileWhatsapp(e.target.value)} className="input" placeholder="WhatsApp number" />
+              <button onClick={() => setNotice('Profile changes saved for this session.')} className="btn-primary">Save profile</button>
+            </div>
+          </Panel>
+          <Panel title="Saved Delivery Addresses">
+            <div className="flex gap-2">
+              <input value={newAddress} onChange={e => setNewAddress(e.target.value)} className="input" placeholder="Delivery address" />
+              <button onClick={saveAddress} className="btn-dark">Save</button>
+            </div>
+            <List items={savedAddresses} render={address => <span>{address}</span>} empty="No saved delivery addresses." />
+            <button onClick={() => setNotice('Password reset link will be sent through the authentication email flow.')} className="btn-light mt-3">Password reset</button>
+          </Panel>
+        </TwoColumn>
+      )}
+
+      {activePage === 'shopping' && (
+        <>
+          <Panel title="Browse, Search, and Filter Products">
+            <div className="grid gap-3 md:grid-cols-[1fr_180px_180px]">
+              <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="input" placeholder="Search products, brands, or vendors" />
+              <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value as 'All' | ProductCategory)} className="input">
+                {categories.map(category => <option key={category}>{category}</option>)}
+              </select>
+              <input type="number" value={priceLimit} onChange={e => setPriceLimit(Number(e.target.value))} className="input" placeholder="Max price" />
+            </div>
+          </Panel>
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filteredProducts.slice(0, 9).map(product => (
+              <div key={product.id} className="rounded-lg border border-gray-200 bg-white p-4">
+                <div className="flex gap-3">
+                  <img src={product.image} alt={product.name} className="h-20 w-20 rounded-lg object-cover" />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-black text-sm">{product.name}</div>
+                    <div className="mt-1 text-xs text-gray-500">{product.vendorName} - {product.category}</div>
+                    <div className="mt-2 text-sm font-black">{money(product.price)}</div>
+                    <div className="mt-1 text-xs text-gray-500">Rating {product.rating} - {product.reviewCount} reviews</div>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button onClick={() => addToCart(product)} className="btn-primary">Add to cart</button>
+                  <button onClick={() => buyNow(product)} className="btn-dark">Buy now</button>
+                  <button onClick={() => toggleWishlist(product.id)} className="btn-light">{wishlist.includes(product.id) ? 'Saved' : 'Wishlist'}</button>
                 </div>
               </div>
-              <input value={refundReason} onChange={e => setRefundReason(e.target.value)} className="input mt-3" />
-              <div className="mt-3 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {order.items.map(item => (
-                  <div key={item.productId} className="flex gap-3 bg-white rounded-lg border border-gray-200 p-2">
-                    <img src={item.image} alt={item.name} className="w-16 h-16 object-cover rounded" />
-                    <div className="text-xs">
-                      <div className="font-black">{item.name}</div>
-                      <div className="text-gray-500">{item.vendorName} • {money(item.price)}</div>
-                      {order.status === 'Delivered' && <button onClick={() => addReview(item.productId, 5, 'Great product and smooth delivery.')} className="mt-2 text-[#374880] font-black">Leave 5-star review</button>}
-                    </div>
-                  </div>
+            ))}
+          </div>
+          <Panel title="Wishlist">
+            <List items={savedProducts} render={product => <span>{product.name} - {money(product.price)} - {product.vendorName}</span>} empty="No saved products yet." />
+          </Panel>
+        </>
+      )}
+
+      {activePage === 'payments' && (
+        <>
+          <div className="grid md:grid-cols-4 gap-4">
+            <Metric label="Pay once" value="Full checkout" icon={<CreditCard size={18} />} />
+            <Metric label="Weekly" value="1-30 weeks" icon={<Clock size={18} />} />
+            <Metric label="Monthly" value="1-8 months" icon={<Clock size={18} />} />
+            <Metric label="Paystack" value="Bank/card" icon={<ShieldCheck size={18} />} />
+          </div>
+          <TwoColumn>
+            <Panel title="Payment Methods">
+              <div className="grid gap-2">
+                {['Paystack Checkout', 'Wallet Payment', 'Bank Transfer via Paystack', 'Pay Once', 'Installment Payment'].map(channel => (
+                  <button key={channel} onClick={() => setPaymentChannel(channel)} className={`rounded-lg border px-4 py-3 text-left text-sm font-black ${paymentChannel === channel ? 'border-[#374880] bg-[#374880] text-white' : 'border-gray-200 bg-white text-gray-700'}`}>{channel}</button>
                 ))}
               </div>
-            </div>
-          ))}
-        </div>
-      </Panel>
+            </Panel>
+            <Panel title="Installment Progress Tracker">
+              <List items={activeInstallments} render={order => <span>{order.id} - Paid {money(order.amountPaid)} of {money(order.totalAmount)} - {Math.round((order.amountPaid / order.totalAmount) * 100)}%</span>} empty="No active installment plans." />
+            </Panel>
+          </TwoColumn>
+          <Panel title="Payment Receipts">
+            <List items={myTransactions.slice(0, 8)} render={txn => <span>{txn.type} - {money(txn.amount)} - {txn.status} - {new Date(txn.createdAt).toLocaleDateString()}</span>} empty="No payment receipts yet." />
+          </Panel>
+        </>
+      )}
 
-      <TwoColumn>
-        <Panel title="Wishlist">
-          <List items={savedProducts} render={product => <span>{product.name} • {money(product.price)}</span>} empty="No saved products yet." />
-        </Panel>
-        <Panel title="Refunds">
-          <List items={myRefunds} render={refund => <span>{refund.orderId}: refunded {money(refund.refundedAmount)} after {money(refund.deduction)} deduction</span>} empty="No refund requests yet." />
-        </Panel>
-      </TwoColumn>
-    </DashboardFrame>
+      {activePage === 'wallet' && (
+        <TwoColumn>
+          <Panel title="Customer Wallet">
+            <div className="grid sm:grid-cols-2 gap-3">
+              <input type="number" value={fundAmount} onChange={e => setFundAmount(e.target.value)} className="input" />
+              <button onClick={() => { fundWallet(Number(fundAmount)); setNotice('Wallet funded successfully.'); }} className="btn-primary">Add money</button>
+              <input type="number" value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} className="input" />
+              <button onClick={handleWithdraw} className="btn-dark">Withdraw eligible balance</button>
+            </div>
+            <p className="mt-3 text-xs text-gray-500">Eligible withdrawals depend on refund, reward, and affiliate earning rules.</p>
+          </Panel>
+          <Panel title="Transaction History">
+            <List items={myTransactions} render={txn => <span>{txn.type}: <strong>{money(txn.amount)}</strong> - {txn.note}</span>} empty="No wallet transactions yet." />
+          </Panel>
+        </TwoColumn>
+      )}
+
+      {activePage === 'delivery' && (
+        <>
+          <Panel title="Orders, Tracking, and Delivery Confirmation">
+            <div className="space-y-4">
+              {myOrders.map(order => (
+                <div key={order.id} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                    <div>
+                      <div className="font-black">{order.id} - {order.status}</div>
+                      <div className="text-xs text-gray-500 mt-1">Tracking {order.trackingNumber || 'Pending'} - Paid {money(order.amountPaid)} of {money(order.totalAmount)} - Products release after full payment</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {order.status === 'Installment Active' && <button onClick={() => payNextInstallment(order.id)} className="btn-primary">Pay next installment</button>}
+                      {order.status === 'Processing Delivery' && <button onClick={() => confirmDelivery(order.id)} className="btn-dark">Confirm delivery</button>}
+                      {!order.refundRequested && order.status !== 'Delivered' && <button onClick={() => requestRefund(order.id, refundReason)} className="btn-light">Request refund</button>}
+                    </div>
+                  </div>
+                  <input value={refundReason} onChange={e => setRefundReason(e.target.value)} className="input mt-3" />
+                  <div className="mt-3 grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {order.items.map(item => (
+                      <div key={item.productId} className="flex gap-3 bg-white rounded-lg border border-gray-200 p-2">
+                        <img src={item.image} alt={item.name} className="w-16 h-16 object-cover rounded" />
+                        <div className="text-xs">
+                          <div className="font-black">{item.name}</div>
+                          <div className="text-gray-500">{item.vendorName} - {money(item.price)}</div>
+                          {order.status === 'Delivered' && <button onClick={() => addReview(item.productId, 5, 'Great product and smooth delivery.')} className="mt-2 text-[#374880] font-black">Leave 5-star review</button>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {!myOrders.length && <EmptyState text="No orders yet." />}
+            </div>
+          </Panel>
+          <TwoColumn>
+            <Panel title="Delivery History"><List items={deliveredOrders} render={order => <span>{order.id} - Delivered to {order.deliveryAddress}</span>} empty="No completed deliveries yet." /></Panel>
+            <Panel title="Refunds and Returns"><List items={myRefunds} render={refund => <span>{refund.orderId}: refunded {money(refund.refundedAmount)} after {money(refund.deduction)} deduction</span>} empty="No refund or return requests yet." /></Panel>
+          </TwoColumn>
+        </>
+      )}
+
+      {activePage === 'support' && (
+        <TwoColumn>
+          <Panel title="Support Tickets">
+            <input value={supportSubject} onChange={e => setSupportSubject(e.target.value)} className="input" placeholder="Subject" />
+            <textarea value={supportBody} onChange={e => setSupportBody(e.target.value)} className="input mt-3 min-h-24" placeholder="Describe the issue" />
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button onClick={() => submitSupportTicket('Support')} className="btn-primary">Submit ticket</button>
+              <button onClick={() => submitSupportTicket('Complaint')} className="btn-light">Submit complaint</button>
+              <button onClick={() => submitSupportTicket('Return')} className="btn-dark">Return request</button>
+            </div>
+            <p className="mt-3 text-xs text-gray-500">Live email support: {settings.supportEmail}</p>
+          </Panel>
+          <Panel title="Ticket History">
+            <List items={supportTickets} render={ticket => <span>{ticket.id} - {ticket.subject} - {ticket.status}</span>} empty="No support tickets yet." />
+          </Panel>
+        </TwoColumn>
+      )}
+
+      {activePage === 'community' && (
+        <>
+          <TwoColumn>
+            <Panel title="Fashion Community">
+              <input value={communityTitle} onChange={e => setCommunityTitle(e.target.value)} className="input" />
+              <textarea value={communityBody} onChange={e => setCommunityBody(e.target.value)} className="input mt-3 min-h-24" />
+              <button onClick={() => { addCommunityPost(communityTitle, communityBody); setNotice('Community post shared.'); }} className="btn-primary mt-3">Share post</button>
+            </Panel>
+            <Panel title="Style Inspiration">
+              <p className="text-sm text-gray-600 leading-6">Discover outfit ideas, discuss trends, and ask styling questions. For event shopping, choose an installment plan that completes before your outfit deadline.</p>
+            </Panel>
+          </TwoColumn>
+          <Panel title="Fashion Discussions">
+            <List items={communityPosts.slice(0, 6)} render={post => <span><strong>{post.title}</strong> - {post.userFullName} - {post.likes} likes</span>} empty="No community discussions yet." />
+          </Panel>
+        </>
+      )}
+
+      {activePage === 'rewards' && (
+        <>
+          <div className="grid md:grid-cols-4 gap-4">
+            <Metric label="Referral reward" value={money(settings.referralReward)} icon={<UserPlus size={18} />} />
+            <Metric label="Referral earned" value={money(referralEarnings)} icon={<Wallet size={18} />} />
+            <Metric label="Affiliate earned" value={money(affiliateEarnings)} icon={<Percent size={18} />} />
+            <Metric label="Minimum purchase" value={money(settings.minimumRewardPurchase)} icon={<Award size={18} />} />
+          </div>
+          <TwoColumn>
+            <Panel title="Referral and Affiliate Program">
+              <p className="text-sm text-gray-600 leading-6">Referral and affiliate rewards are credited after a successful customer purchase of at least {money(settings.minimumRewardPurchase)}.</p>
+              <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-black">Referral code: {currentUser.referralCode || 'Pending'}</div>
+              <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-black">Affiliate code: {currentUser.affiliateCode || 'Apply from affiliate portal'}</div>
+            </Panel>
+            <Panel title="Promotions">
+              <input value={promoCode} onChange={e => setPromoCode(e.target.value.toUpperCase())} className="input" placeholder="Promo code" />
+              <button onClick={() => setNotice(`${promoCode} will be validated at checkout.`)} className="btn-primary mt-3">Apply promo code</button>
+              <List items={['Seasonal sales', 'Flash sales', 'Loyalty rewards', 'New arrival offers']} render={item => <span>{item}</span>} empty="No promotions." />
+            </Panel>
+          </TwoColumn>
+        </>
+      )}
+
+      {activePage === 'notifications' && (
+        <TwoColumn>
+          <Panel title="Notification Preferences">
+            <div className="grid gap-2">
+              {Object.entries(preferences).map(([key, value]) => (
+                <label key={key} className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-bold capitalize">
+                  <span>{key === 'payments' ? 'Payment reminders' : key}</span>
+                  <input type="checkbox" checked={value} onChange={e => setPreferences(prev => ({ ...prev, [key]: e.target.checked }))} className="accent-[#374880]" />
+                </label>
+              ))}
+            </div>
+          </Panel>
+          <Panel title="Notification Center">
+            <List items={myNotifications} render={item => <span><strong>{item.title}</strong> - {item.message} {!item.read && <button onClick={() => markNotificationRead(item.id)} className="ml-2 text-[#374880] font-black">Mark read</button>}</span>} empty="No notifications." />
+          </Panel>
+        </TwoColumn>
+      )}
+    </DashboardSidebarFrame>
   );
 };
 
