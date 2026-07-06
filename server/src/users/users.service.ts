@@ -310,6 +310,57 @@ export class UsersService {
     });
   }
 
+  async withdrawVendorMoneyBox(userId: string, amount: number) {
+    const cleanAmount = Number(amount);
+    if (!Number.isFinite(cleanAmount) || cleanAmount <= 0) {
+      throw new BadRequestException('Enter a valid withdrawal amount');
+    }
+
+    return this.prisma.$transaction(async tx => {
+      const vendor = await tx.user.findUnique({ where: { id: userId } });
+      if (!vendor) {
+        throw new NotFoundException('Vendor not found');
+      }
+
+      if (vendor.role !== UserRole.VENDOR) {
+        throw new BadRequestException('Only vendor accounts can withdraw from Vendor Money Box');
+      }
+
+      if (vendor.vendorMoneyBox < cleanAmount) {
+        throw new BadRequestException('Insufficient Vendor Money Box balance.');
+      }
+
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: { vendorMoneyBox: { decrement: cleanAmount } },
+      });
+
+      const transaction = await tx.walletTransaction.create({
+        data: {
+          userId,
+          type: 'Withdrawal',
+          amount: cleanAmount,
+          status: 'Completed',
+          note: 'Vendor Money Box withdrawal requested to saved bank account.',
+          reference: `CV-VENDOR-WITHDRAW-${Date.now()}-${userId.slice(0, 8)}`,
+        },
+      });
+
+      const notification = await tx.notification.create({
+        data: {
+          userId,
+          title: 'Vendor withdrawal',
+          message: `Your Vendor Money Box withdrawal of ₦${cleanAmount.toLocaleString()} has been completed.`,
+          channel: 'In App',
+          type: 'success',
+        },
+      });
+
+      const { password, emailVerificationTokenHash, emailVerificationExpiresAt, ...safeUser } = user;
+      return { user: safeUser, transaction, notification };
+    });
+  }
+
   async listNotifications(userId: string) {
     return this.prisma.notification.findMany({
       where: { userId },
@@ -507,6 +558,8 @@ export class UsersService {
         bnplStatus: true,
         creditLimit: true,
         walletBalance: true,
+        vendorMoneyBox: true,
+        totalVendorSales: true,
         isVerified: true,
         adminPermissions: true,
         createdAt: true,

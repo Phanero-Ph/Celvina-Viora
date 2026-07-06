@@ -17,6 +17,18 @@ export class OrderItemDto {
 
   @IsString()
   @IsOptional()
+  vendorId?: string;
+
+  @IsString()
+  @IsOptional()
+  vendorName?: string;
+
+  @IsString()
+  @IsOptional()
+  source?: string;
+
+  @IsString()
+  @IsOptional()
   category?: string;
 
   @IsNumber()

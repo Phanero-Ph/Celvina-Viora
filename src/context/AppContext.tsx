@@ -69,6 +69,7 @@ interface AppContextType {
   resetPassword: (payload: { token: string; password: string }) => Promise<string>;
   logoutUser: () => void;
   addToCart: (product: Product, quantity?: number) => void;
+  loadProducts: () => Promise<Product[]>;
   updateCartQuantity: (productId: string, quantity: number) => void;
   removeFromCart: (productId: string) => void;
   clearCart: () => void;
@@ -86,9 +87,9 @@ interface AppContextType {
   loadNotifications: () => Promise<AppNotification[]>;
   addReview: (productId: string, rating: number, comment: string) => void;
   markNotificationRead: (id: string) => void;
-  vendorAddProduct: (product: Omit<Product, 'id' | 'vendorName' | 'source' | 'rating' | 'reviewCount'>) => void;
+  vendorAddProduct: (product: Omit<Product, 'id' | 'vendorName' | 'source' | 'rating' | 'reviewCount'>) => Promise<Product | void>;
   vendorCreateAd: (productId: string, placement: VendorAd['placement'], days: 1 | 2) => void;
-  vendorWithdraw: (amount: number) => { success: boolean; message: string };
+  vendorWithdraw: (amount: number) => Promise<{ success: boolean; message: string }>;
   addCommunityPost: (title: string, body: string) => Promise<CommunityPost | void>;
   loadCommunityPosts: () => Promise<CommunityPost[]>;
   updateCustomerProfile: (payload: { fullName: string; phone: string; whatsappNumber?: string; picture?: string; address?: string; savedAddresses?: string[] }) => Promise<User>;
@@ -183,9 +184,32 @@ const adaptApiUser = (apiUser: any): User => ({
   referralCode: apiUser.role === 'CUSTOMER' ? `${apiUser.fullName?.split(' ')[0] || 'CV'}-${apiUser.id.slice(0, 4)}`.toUpperCase() : undefined,
   affiliateCode: apiUser.role === 'AFFILIATE' ? `${apiUser.fullName?.split(' ')[0] || 'AFF'}STYLE`.toUpperCase() : undefined,
   walletBalance: Number(apiUser.walletBalance || 0),
-  vendorMoneyBox: apiUser.role === 'VENDOR' ? 0 : undefined,
+  vendorMoneyBox: apiUser.role === 'VENDOR' ? Number(apiUser.vendorMoneyBox || 0) : undefined,
   createdAt: apiUser.createdAt || new Date().toISOString(),
 });
+
+const adaptApiProduct = (apiProduct: any, index = 0): Product => enrichProduct({
+  id: apiProduct.id,
+  vendorId: apiProduct.vendorId || undefined,
+  vendorName: apiProduct.vendorName || (apiProduct.source === 'Vendor' ? 'Vendor' : 'Celvina Viora'),
+  name: apiProduct.name,
+  category: apiProduct.category,
+  price: Number(apiProduct.price || 0),
+  image: apiProduct.image,
+  description: apiProduct.description,
+  brand: apiProduct.brand || undefined,
+  color: apiProduct.color || undefined,
+  sizes: Array.isArray(apiProduct.sizes) ? apiProduct.sizes : [],
+  inStock: Boolean(apiProduct.inStock),
+  isActive: Boolean(apiProduct.isActive),
+  stockQuantity: Number(apiProduct.stockQuantity || 0),
+  rating: Number(apiProduct.rating || 0),
+  reviewCount: Number(apiProduct.reviewCount || 0),
+  source: apiProduct.source === 'Vendor' ? 'Vendor' : 'Celvina Viora',
+  sponsored: Boolean(apiProduct.sponsored),
+  featured: Boolean(apiProduct.featured),
+  flashSale: Boolean(apiProduct.flashSaleEnabled),
+}, index);
 
 const adaptApiWalletTransaction = (txn: any): WalletTransaction => ({
   id: txn.id,
@@ -315,6 +339,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setUsers(prev => prev.some(user => user.id === apiUser.id)
           ? prev.map(user => user.id === apiUser.id ? { ...user, ...apiUser } : user)
           : [apiUser, ...prev]);
+        if (apiUser.role === 'vendor') {
+          setVendorProfiles(prev => prev.some(vendor => vendor.userId === apiUser.id)
+            ? prev.map(vendor => vendor.userId === apiUser.id ? { ...vendor, moneyBoxBalance: apiUser.vendorMoneyBox || 0 } : vendor)
+            : [{
+              id: makeId('vendor'),
+              userId: apiUser.id,
+              storeName: apiUser.businessName || `${apiUser.fullName} Store`,
+              bankName: apiUser.bankName || 'Pending setup',
+              accountNumber: apiUser.accountNumber || 'Pending setup',
+              accountName: apiUser.accountName || apiUser.fullName,
+              moneyBoxBalance: apiUser.vendorMoneyBox || 0,
+              totalSales: 0,
+              activeAds: 0,
+              rating: 0,
+            }, ...prev]);
+        }
         setCurrentUserId(apiUser.id);
         setIsAuthenticated(true);
       })
@@ -395,7 +435,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         bankName: 'Pending setup',
         accountNumber: 'Pending setup',
         accountName: newUser.fullName,
-        moneyBoxBalance: 0,
+        moneyBoxBalance: newUser.vendorMoneyBox || 0,
         totalSales: 0,
         activeAds: 0,
         rating: 0,
@@ -423,11 +463,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         bankName: 'Pending setup',
         accountNumber: 'Pending setup',
         accountName: user.fullName,
-        moneyBoxBalance: 0,
+        moneyBoxBalance: user.vendorMoneyBox || 0,
         totalSales: 0,
         activeAds: 0,
         rating: 0,
       }, ...prev]);
+    } else if (user.role === 'vendor') {
+      setVendorProfiles(prev => prev.map(vendor => vendor.userId === user.id ? {
+        ...vendor,
+        moneyBoxBalance: user.vendorMoneyBox || 0,
+      } : vendor));
     }
     setCurrentUserId(user.id);
     setCart([]);
@@ -526,6 +571,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const clearCart = () => setCart([]);
 
+  const loadProducts = async () => {
+    const response = await apiClient.get('/products');
+    const nextProducts = response.data.map(adaptApiProduct);
+    if (!nextProducts.length) return products;
+    setProducts(nextProducts);
+    return nextProducts;
+  };
+
   const toggleWishlist = (productId: string) => {
     setWishlistByUser(prev => {
       const current = prev[currentUser.id] || [];
@@ -558,6 +611,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             productId: item.product.id,
             quantity: item.quantity,
             name: item.product.name,
+            vendorId: item.product.vendorId,
+            vendorName: item.product.vendorName,
+            source: item.product.source,
             category: item.product.category,
             price: item.product.price,
             image: item.product.image,
@@ -911,10 +967,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const vendorAddProduct = (product: Omit<Product, 'id' | 'vendorName' | 'source' | 'rating' | 'reviewCount'>) => {
+  const vendorAddProduct = async (product: Omit<Product, 'id' | 'vendorName' | 'source' | 'rating' | 'reviewCount'>) => {
     const vendor = vendorProfiles.find(item => item.userId === currentUser.id);
-    if (!vendor) return;
-    setProducts(prev => [{
+    if (!vendor) return undefined;
+    if (isAuthenticated) {
+      const response = await apiClient.post('/products/vendor', {
+        ...product,
+        source: 'Vendor',
+        vendorName: vendor.storeName,
+      });
+      const createdProduct = adaptApiProduct(response.data);
+      setProducts(prev => [createdProduct, ...prev.filter(item => item.id !== createdProduct.id)]);
+      return createdProduct;
+    }
+
+    const createdProduct: Product = {
       ...product,
       id: makeId('prod'),
       vendorId: vendor.id,
@@ -922,7 +989,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       source: 'Vendor',
       rating: 0,
       reviewCount: 0,
-    }, ...prev]);
+    };
+    setProducts(prev => [createdProduct, ...prev]);
+    return createdProduct;
   };
 
   const vendorCreateAd = (productId: string, placement: VendorAd['placement'], days: 1 | 2) => {
@@ -943,9 +1012,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setProducts(prev => prev.map(product => product.id === productId ? { ...product, sponsored: placement !== 'Featured products', featured: placement === 'Featured products' } : product));
   };
 
-  const vendorWithdraw = (amount: number) => {
+  const vendorWithdraw = async (amount: number) => {
     const vendor = vendorProfiles.find(item => item.userId === currentUser.id);
     if (!vendor || amount <= 0 || amount > vendor.moneyBoxBalance) return { success: false, message: 'Insufficient Vendor Money Box balance.' };
+    if (isAuthenticated) {
+      try {
+        const response = await apiClient.post('/users/me/vendor-money-box/withdraw', { amount });
+        const updatedUser = adaptApiUser(response.data.user);
+        const transaction = adaptApiWalletTransaction(response.data.transaction);
+        const notification = adaptApiNotification(response.data.notification);
+        setUsers(prev => prev.map(user => user.id === updatedUser.id ? { ...user, ...updatedUser } : user));
+        setVendorProfiles(prev => prev.map(item => item.userId === updatedUser.id ? {
+          ...item,
+          moneyBoxBalance: updatedUser.vendorMoneyBox || 0,
+        } : item));
+        setWalletTransactions(prev => [transaction, ...prev.filter(item => item.id !== transaction.id)]);
+        setNotifications(prev => [notification, ...prev.filter(item => item.id !== notification.id)]);
+        return { success: true, message: 'Vendor withdrawal sent to bank account.' };
+      } catch (error: any) {
+        return { success: false, message: error.response?.data?.message || 'Unable to withdraw from Vendor Money Box right now.' };
+      }
+    }
+
     setVendorProfiles(prev => prev.map(item => item.id === vendor.id ? { ...item, moneyBoxBalance: item.moneyBoxBalance - amount } : item));
     return { success: true, message: 'Vendor withdrawal sent to bank account.' };
   };
@@ -1029,6 +1117,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     resetPassword,
     logoutUser,
     addToCart,
+    loadProducts,
     updateCartQuantity,
     removeFromCart,
     clearCart,

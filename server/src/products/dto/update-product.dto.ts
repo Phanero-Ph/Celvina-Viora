@@ -1,10 +1,22 @@
-import { IsString, IsNumber, IsBoolean, IsOptional, Min, IsUrl } from 'class-validator';
+import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, IsUrl, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class UpdateProductDto {
   @IsString()
   @IsOptional()
   name?: string;
+
+  @IsString()
+  @IsOptional()
+  vendorId?: string;
+
+  @IsString()
+  @IsOptional()
+  vendorName?: string;
+
+  @IsString()
+  @IsOptional()
+  source?: string;
 
   @IsString()
   @IsOptional()
@@ -23,6 +35,19 @@ export class UpdateProductDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @IsString()
+  @IsOptional()
+  brand?: string;
+
+  @IsString()
+  @IsOptional()
+  color?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  sizes?: string[];
 
   @IsBoolean()
   @IsOptional()
@@ -47,6 +72,14 @@ export class UpdateProductDto {
   @IsBoolean()
   @IsOptional()
   flashSaleEnabled?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  sponsored?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  featured?: boolean;
 
   @IsBoolean()
   @IsOptional()

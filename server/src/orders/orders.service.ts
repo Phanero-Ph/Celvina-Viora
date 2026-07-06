@@ -29,6 +29,9 @@ export class OrdersService {
         data: {
           id: item.productId,
           name: item.name.trim(),
+          vendorId: item.source === 'Vendor' ? item.vendorId : undefined,
+          vendorName: item.source === 'Vendor' ? item.vendorName : undefined,
+          source: item.source || 'Celvina Viora',
           category: item.category || 'Lifestyle',
           price: Number(item.price),
           image: item.image,
@@ -291,6 +294,60 @@ export class OrdersService {
     }
 
     return this.prisma.$transaction(async tx => {
+      const productIds = order.items.map(item => item.productId);
+      const products = await tx.product.findMany({
+        where: { id: { in: productIds } },
+        select: { id: true, vendorId: true },
+      });
+      const productVendor = new Map(products.map(product => [product.id, product.vendorId]));
+      const companyFee = 3500;
+
+      const vendorTotals = new Map<string, number>();
+      for (const item of order.items) {
+        const vendorId = productVendor.get(item.productId);
+        if (!vendorId) continue;
+        const gross = item.price * item.quantity;
+        const net = Math.max(0, gross - companyFee * item.quantity);
+        vendorTotals.set(vendorId, (vendorTotals.get(vendorId) || 0) + net);
+      }
+
+      const vendorIds = [...vendorTotals.keys()];
+      const vendors = await tx.user.findMany({
+        where: { id: { in: vendorIds } },
+        select: { id: true },
+      });
+      const existingVendorIds = new Set(vendors.map(vendor => vendor.id));
+
+      for (const [vendorId, earning] of vendorTotals) {
+        if (!existingVendorIds.has(vendorId)) continue;
+        await tx.user.update({
+          where: { id: vendorId },
+          data: {
+            vendorMoneyBox: { increment: earning },
+            totalVendorSales: { increment: earning },
+          },
+        });
+        await tx.walletTransaction.create({
+          data: {
+            userId: vendorId,
+            type: 'Vendor Earning',
+            amount: earning,
+            status: 'Completed',
+            note: `Vendor earning for delivered order ${orderId} after Celvina Viora fees.`,
+            reference: `CV-VENDOR-${Date.now()}-${vendorId.slice(0, 8)}`,
+          },
+        });
+        await tx.notification.create({
+          data: {
+            userId: vendorId,
+            title: 'Vendor Money Box credited',
+            message: `₦${earning.toLocaleString()} has been credited after delivery confirmation.`,
+            channel: 'In App',
+            type: 'success',
+          },
+        });
+      }
+
       const updatedOrder = await tx.order.update({
         where: { id: orderId },
         data: {

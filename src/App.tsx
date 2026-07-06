@@ -40,7 +40,7 @@ const categories: Array<'All' | ProductCategory> = ['All', 'Clothing', 'Shoes', 
 type View = 'home' | 'customer' | 'vendor' | 'affiliate' | 'admin' | 'super_admin' | 'community';
 
 const Shell: React.FC = () => {
-  const { currentUser, isAuthenticated, cart, notifications, logoutUser, verifyEmail } = useApp();
+  const { currentUser, isAuthenticated, cart, notifications, logoutUser, verifyEmail, loadProducts } = useApp();
   const [view, setView] = useState<View>('home');
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -57,6 +57,10 @@ const Shell: React.FC = () => {
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const unread = isAuthenticated ? notifications.filter(item => item.userId === currentUser.id && !item.read).length : 0;
   const dashboardViewFor = (user: User): View => user.role === 'super_admin' ? 'super_admin' : user.role === 'admin' ? 'admin' : user.role === 'affiliate' ? 'affiliate' : user.role;
+
+  useEffect(() => {
+    loadProducts().catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -927,8 +931,9 @@ const VendorDashboard: React.FC = () => {
   const { currentUser, vendorProfiles, products, orders, vendorAds, settings, vendorAddProduct, vendorCreateAd, vendorWithdraw } = useApp();
   const [activePage, setActivePage] = useState<'overview' | 'products' | 'sales' | 'advertising' | 'moneyBox' | 'analytics'>('overview');
   const vendor = vendorProfiles.find(item => item.userId === currentUser.id);
-  const vendorProducts = products.filter(product => product.vendorId === vendor?.id);
-  const vendorOrders = orders.filter(order => order.items.some(item => item.vendorId === vendor?.id));
+  const vendorOwnerIds = [vendor?.id, currentUser.id].filter(Boolean);
+  const vendorProducts = products.filter(product => product.vendorId && vendorOwnerIds.includes(product.vendorId));
+  const vendorOrders = orders.filter(order => order.items.some(item => item.vendorId && vendorOwnerIds.includes(item.vendorId)));
   const activeAds = vendor ? vendorAds.filter(ad => ad.vendorId === vendor.id) : [];
   const [productName, setProductName] = useState('New Vendor Fashion Item');
   const [price, setPrice] = useState('35000');
@@ -937,8 +942,9 @@ const VendorDashboard: React.FC = () => {
 
   if (!vendor) return <DashboardFrame title="Vendor Console" subtitle="Switch to the vendor persona to manage products and earnings."><EmptyState text="No vendor profile selected." /></DashboardFrame>;
 
-  const createProduct = () => {
-    vendorAddProduct({
+  const createProduct = async () => {
+    try {
+      await vendorAddProduct({
       name: productName,
       category: 'Clothing',
       price: Number(price),
@@ -947,7 +953,11 @@ const VendorDashboard: React.FC = () => {
       inStock: true,
       isActive: true,
       stockQuantity: 10,
-    });
+      });
+      setNotice('Product uploaded successfully.');
+    } catch {
+      setNotice('Unable to upload product right now.');
+    }
   };
 
   return (
@@ -982,7 +992,7 @@ const VendorDashboard: React.FC = () => {
         </Panel>}
         {activePage === 'moneyBox' && <Panel title="Withdraw Earnings">
           <input type="number" value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} className="input" />
-          <button onClick={() => { const result = vendorWithdraw(Number(withdrawAmount)); setNotice(result.message); }} className="btn-dark mt-3">Withdraw to bank</button>
+          <button onClick={async () => { const result = await vendorWithdraw(Number(withdrawAmount)); setNotice(result.message); }} className="btn-dark mt-3">Withdraw to bank</button>
           {notice && <p className="mt-3 text-xs font-bold text-[#374880]">{notice}</p>}
         </Panel>}
       </>

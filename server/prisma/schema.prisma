@@ -105,6 +105,8 @@ model User {
   creditLimit     Int           @default(0)
   creditScore     Int?
   walletBalance   Float         @default(0)
+  vendorMoneyBox  Float         @default(0)
+  totalVendorSales Float        @default(0)
   restrictedReason String?
   address         String?
   residentialAddress String?
@@ -186,6 +188,9 @@ model PasswordResetToken {
 model Product {
   id                   String   @id @default(uuid())
   name                 String
+  vendorId             String?
+  vendorName           String?
+  source               String   @default("Celvina Viora")
   category             String // Clothing, Shoes, Bags, Accessories
   price                Float
   image                String
@@ -198,6 +203,8 @@ model Product {
   stockQuantity        Int      @default(0)
   reorderLevel         Int      @default(5)
   flashSaleEnabled     Boolean  @default(false)
+  sponsored            Boolean  @default(false)
+  featured             Boolean  @default(false)
   bulkDiscountEligible Boolean  @default(true)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt

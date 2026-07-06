@@ -86,6 +86,13 @@ export class UsersController {
     return this.usersService.withdrawWallet(req.user.id, walletAmountDto.amount);
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.VENDOR)
+  @Post('me/vendor-money-box/withdraw')
+  withdrawFromMyVendorMoneyBox(@Request() req, @Body() walletAmountDto: WalletAmountDto) {
+    return this.usersService.withdrawVendorMoneyBox(req.user.id, walletAmountDto.amount);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('me/notifications')
   listMyNotifications(@Request() req) {
