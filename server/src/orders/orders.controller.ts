@@ -1,6 +1,6 @@
-import { Controller, Get, Post, Body, Param, UseGuards, Request } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Request, UseGuards } from '@nestjs/common';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, RefundOrderDto } from './dto/create-order.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -23,25 +23,40 @@ export class OrdersController {
     return this.ordersService.getMyOrders(req.user.id);
   }
 
-  @UseGuards(JwtAuthGuard)
-  @Get(':id')
-  findOne(@Request() req, @Param('id') id: string) {
-    return this.ordersService.getOrderById(req.user.id, id);
-  }
-
-  // Admin route to see all orders
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @Get('admin/all')
   findAllAdmin() {
-    // In a real app, add pagination here
-    return this.ordersService['prisma'].order.findMany({
-      include: {
-        user: { select: { fullName: true, email: true } },
-        items: true,
-        schedule: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.ordersService.findAllAdmin();
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me/refunds')
+  listMyRefunds(@Request() req) {
+    return this.ordersService.listRefunds(req.user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/pay-next')
+  payNextInstallment(@Request() req, @Param('id') id: string) {
+    return this.ordersService.payNextInstallment(req.user.id, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/confirm-delivery')
+  confirmDelivery(@Request() req, @Param('id') id: string) {
+    return this.ordersService.confirmDelivery(req.user.id, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/refund')
+  requestRefund(@Request() req, @Param('id') id: string, @Body() refundOrderDto: RefundOrderDto) {
+    return this.ordersService.requestRefund(req.user.id, id, refundOrderDto.reason);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id')
+  findOne(@Request() req, @Param('id') id: string) {
+    return this.ordersService.getOrderById(req.user.id, id);
   }
 }

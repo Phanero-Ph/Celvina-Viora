@@ -486,6 +486,8 @@ const CustomerDashboard: React.FC = () => {
     supportTickets,
     fundWallet,
     withdrawWallet,
+    loadOrders,
+    loadRefunds,
     payNextInstallment,
     confirmDelivery,
     requestRefund,
@@ -607,9 +609,28 @@ const CustomerDashboard: React.FC = () => {
     setNotice(`${product.name} is ready for checkout. Open cart to complete payment.`);
   };
 
+  const handlePayNextInstallment = async (orderId: string) => {
+    const result = await payNextInstallment(orderId);
+    setNotice(result.message);
+  };
+
+  const handleConfirmDelivery = async (orderId: string) => {
+    const result = await confirmDelivery(orderId);
+    setNotice(result.message);
+  };
+
+  const handleRequestRefund = async (orderId: string) => {
+    const result = await requestRefund(orderId, refundReason);
+    setNotice(result.message);
+  };
+
   useEffect(() => {
     if (activePage === 'support') {
       loadSupportTickets().catch(() => setNotice('Unable to load support tickets right now.'));
+    }
+    if (activePage === 'delivery' || activePage === 'payments') {
+      loadOrders().catch(() => setNotice('Unable to load orders right now.'));
+      loadRefunds().catch(() => undefined);
     }
     if (activePage === 'wallet' || activePage === 'payments') {
       loadWalletTransactions().catch(() => setNotice('Unable to load wallet transactions right now.'));
@@ -791,9 +812,9 @@ const CustomerDashboard: React.FC = () => {
                       <div className="text-xs text-gray-500 mt-1">Tracking {order.trackingNumber || 'Pending'} - Paid {money(order.amountPaid)} of {money(order.totalAmount)} - Products release after full payment</div>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {order.status === 'Installment Active' && <button onClick={() => payNextInstallment(order.id)} className="btn-primary">Pay next installment</button>}
-                      {order.status === 'Processing Delivery' && <button onClick={() => confirmDelivery(order.id)} className="btn-dark">Confirm delivery</button>}
-                      {!order.refundRequested && order.status !== 'Delivered' && <button onClick={() => requestRefund(order.id, refundReason)} className="btn-light">Request refund</button>}
+                      {order.status === 'Installment Active' && <button onClick={() => handlePayNextInstallment(order.id)} className="btn-primary">Pay next installment</button>}
+                      {order.status === 'Processing Delivery' && <button onClick={() => handleConfirmDelivery(order.id)} className="btn-dark">Confirm delivery</button>}
+                      {!order.refundRequested && order.status !== 'Delivered' && <button onClick={() => handleRequestRefund(order.id)} className="btn-light">Request refund</button>}
                     </div>
                   </div>
                   <input value={refundReason} onChange={e => setRefundReason(e.target.value)} className="input mt-3" />
@@ -1479,8 +1500,8 @@ const CheckoutModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isO
   const total = subtotal + settings.deliveryFee;
   const dueNow = paymentPlan === 'pay_once' ? total : total / duration;
 
-  const submit = () => {
-    const result = createOrder({ paymentPlan, duration, deliveryAddress: address, affiliateCode });
+  const submit = async () => {
+    const result = await createOrder({ paymentPlan, duration, deliveryAddress: address, affiliateCode });
     setMessage(result.message);
     if (result.success) setTimeout(onClose, 900);
   };

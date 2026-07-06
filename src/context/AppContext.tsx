@@ -74,10 +74,12 @@ interface AppContextType {
   clearCart: () => void;
   toggleWishlist: (productId: string) => void;
   loadWishlist: () => Promise<string[]>;
-  createOrder: (input: CreateOrderInput) => { success: boolean; message: string };
-  payNextInstallment: (orderId: string) => void;
-  confirmDelivery: (orderId: string) => void;
-  requestRefund: (orderId: string, reason: string) => void;
+  createOrder: (input: CreateOrderInput) => Promise<{ success: boolean; message: string }>;
+  loadOrders: () => Promise<Order[]>;
+  loadRefunds: () => Promise<RefundRequest[]>;
+  payNextInstallment: (orderId: string) => Promise<{ success: boolean; message: string }>;
+  confirmDelivery: (orderId: string) => Promise<{ success: boolean; message: string }>;
+  requestRefund: (orderId: string, reason: string) => Promise<{ success: boolean; message: string }>;
   fundWallet: (amount: number) => Promise<{ success: boolean; message: string }>;
   withdrawWallet: (amount: number) => Promise<{ success: boolean; message: string }>;
   loadWalletTransactions: () => Promise<WalletTransaction[]>;
@@ -203,6 +205,81 @@ const adaptApiNotification = (notification: any): AppNotification => ({
   type: notification.type === 'danger' ? 'warning' : notification.type || 'info',
   createdAt: notification.createdAt || new Date().toISOString(),
   read: Boolean(notification.read),
+});
+
+const planFromApi = (installmentType: string): PaymentPlanType => {
+  if (installmentType === 'WEEKLY') return 'weekly';
+  if (installmentType === 'MONTHLY') return 'monthly';
+  return 'pay_once';
+};
+
+const planToApi = (paymentPlan: PaymentPlanType) => {
+  if (paymentPlan === 'weekly') return 'WEEKLY';
+  if (paymentPlan === 'monthly') return 'MONTHLY';
+  return 'PAY_ONCE';
+};
+
+const statusFromApi = (status: string): Order['status'] => {
+  if (status === 'DELIVERED_100_COMPLETED') return 'Delivered';
+  if (status === 'REFUND_REQUESTED') return 'Refund Requested';
+  if (status === 'REFUNDED') return 'Refunded';
+  if (status === 'PAY_ONCE_100_DELIVERED' || status === 'ELIGIBLE_100_DELIVERY') return 'Processing Delivery';
+  if (status === 'ONGOING_0_DELIVERED' || status === 'DELIVERED_50_ONGOING') return 'Installment Active';
+  return 'Payment Pending';
+};
+
+const adaptApiOrder = (apiOrder: any, productCatalog: Product[] = []): Order => {
+  const paymentPlan = planFromApi(apiOrder.installmentType);
+  const schedule = (apiOrder.schedule || []).map((item: any) => ({
+    installmentNumber: item.installmentNumber,
+    dueDate: String(item.dueDate).slice(0, 10),
+    amount: Number(item.amount || 0),
+    status: item.status === 'PAID' ? 'Paid' as const : 'Pending' as const,
+  }));
+  const amountPaid = schedule.filter(item => item.status === 'Paid').reduce((sum, item) => sum + item.amount, 0);
+
+  return {
+    id: apiOrder.id,
+    userId: apiOrder.userId,
+    userFullName: apiOrder.user?.fullName || '',
+    items: (apiOrder.items || []).map((item: any) => {
+      const product = productCatalog.find(entry => entry.id === item.productId);
+      return {
+        productId: item.productId,
+        vendorId: product?.vendorId,
+        vendorName: product?.vendorName || 'Celvina Viora',
+        name: item.name,
+        price: Number(item.price || 0),
+        quantity: Number(item.quantity || 1),
+        image: product?.image || '',
+      };
+    }),
+    paymentPlan,
+    duration: Number(apiOrder.duration || 1),
+    subtotal: Number(apiOrder.totalItemsAmount || 0),
+    deliveryFee: Number(apiOrder.deliveryFee || 0),
+    totalAmount: Number(apiOrder.totalAmount || 0),
+    amountPaid,
+    status: statusFromApi(apiOrder.status),
+    schedule,
+    deliveryAddress: apiOrder.deliveryAddress || '',
+    trackingNumber: apiOrder.trackingNumber || undefined,
+    deliveryConfirmed: apiOrder.status === 'DELIVERED_100_COMPLETED',
+    refundRequested: apiOrder.status === 'REFUND_REQUESTED' || apiOrder.status === 'REFUNDED',
+    createdAt: apiOrder.createdAt || new Date().toISOString(),
+  };
+};
+
+const adaptApiRefund = (apiRefund: any): RefundRequest => ({
+  id: apiRefund.id,
+  userId: apiRefund.userId,
+  orderId: apiRefund.orderId,
+  requestedAmount: Number(apiRefund.requestedAmount || apiRefund.amount || 0),
+  deduction: Number(apiRefund.deduction || 0),
+  refundedAmount: Number(apiRefund.amount || 0),
+  reason: apiRefund.reason || '',
+  status: apiRefund.status === 'Approved' ? 'Approved' : apiRefund.status === 'Rejected' ? 'Rejected' : 'Pending',
+  createdAt: apiRefund.createdAt || new Date().toISOString(),
 });
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -469,10 +546,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return productIds;
   };
 
-  const createOrder = ({ paymentPlan, duration, deliveryAddress, affiliateCode }: CreateOrderInput) => {
+  const createOrder = async ({ paymentPlan, duration, deliveryAddress, affiliateCode }: CreateOrderInput) => {
     if (!cart.length) return { success: false, message: 'Your cart is empty.' };
     if (paymentPlan === 'weekly' && (duration < 1 || duration > 30)) return { success: false, message: 'Weekly plans must be 1 to 30 weeks.' };
     if (paymentPlan === 'monthly' && (duration < 1 || duration > 8)) return { success: false, message: 'Monthly plans must be 1 to 8 months.' };
+
+    if (isAuthenticated) {
+      try {
+        const response = await apiClient.post('/orders', {
+          items: cart.map(item => ({
+            productId: item.product.id,
+            quantity: item.quantity,
+            name: item.product.name,
+            category: item.product.category,
+            price: item.product.price,
+            image: item.product.image,
+            description: item.product.description,
+            brand: item.product.brand,
+            color: item.product.color,
+            sizes: item.product.sizes,
+          })),
+          installmentType: planToApi(paymentPlan),
+          duration: paymentPlan === 'pay_once' ? 1 : duration,
+          deliveryAddress,
+          affiliateCode,
+        });
+        const order = adaptApiOrder(response.data, products);
+        setOrders(prev => [order, ...prev.filter(item => item.id !== order.id)]);
+        setProducts(prev => prev.map(product => {
+          const item = cart.find(cartItem => cartItem.product.id === product.id);
+          if (!item) return product;
+          const stockQuantity = Math.max(0, product.stockQuantity - item.quantity);
+          return { ...product, stockQuantity, inStock: stockQuantity > 0 };
+        }));
+        clearCart();
+        await loadNotifications().catch(() => undefined);
+        return { success: true, message: `Order ${order.id} created successfully.` };
+      } catch (error: any) {
+        return { success: false, message: error.response?.data?.message || 'Unable to create order right now.' };
+      }
+    }
 
     const subtotal = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
     const totalAmount = subtotal + PLATFORM_SETTINGS.deliveryFee;
@@ -550,7 +663,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true, message: `Order ${order.id} created successfully.` };
   };
 
-  const payNextInstallment = (orderId: string) => {
+  const loadOrders = async () => {
+    const response = await apiClient.get('/orders');
+    const nextOrders = response.data.map((order: any) => adaptApiOrder(order, products));
+    setOrders(prev => {
+      const otherUsers = prev.filter(order => order.userId !== currentUser.id);
+      return [...nextOrders, ...otherUsers];
+    });
+    return nextOrders;
+  };
+
+  const loadRefunds = async () => {
+    const response = await apiClient.get('/orders/me/refunds');
+    const nextRefunds = response.data.map(adaptApiRefund);
+    setRefunds(prev => {
+      const otherUsers = prev.filter(refund => refund.userId !== currentUser.id);
+      return [...nextRefunds, ...otherUsers];
+    });
+    return nextRefunds;
+  };
+
+  const payNextInstallment = async (orderId: string) => {
+    if (isAuthenticated) {
+      try {
+        const response = await apiClient.patch(`/orders/${orderId}/pay-next`);
+        const order = adaptApiOrder(response.data, products);
+        setOrders(prev => prev.map(item => item.id === order.id ? { ...item, ...order } : item));
+        await loadNotifications().catch(() => undefined);
+        return { success: true, message: 'Installment payment completed.' };
+      } catch (error: any) {
+        return { success: false, message: error.response?.data?.message || 'Unable to pay installment right now.' };
+      }
+    }
+
     setOrders(prev => prev.map(order => {
       if (order.id !== orderId) return order;
       const nextInstallment = order.schedule.find(item => item.status === 'Pending');
@@ -567,11 +712,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         trackingNumber: fullyPaid ? makeId('CV-NG') : order.trackingNumber,
       };
     }));
+    return { success: true, message: 'Installment payment completed.' };
   };
 
-  const confirmDelivery = (orderId: string) => {
+  const confirmDelivery = async (orderId: string) => {
     const order = orders.find(item => item.id === orderId);
-    if (!order || order.deliveryConfirmed) return;
+    if (!order) return { success: false, message: 'Order not found.' };
+    if (order.deliveryConfirmed) return { success: false, message: 'Delivery has already been confirmed.' };
+    if (isAuthenticated) {
+      try {
+        const response = await apiClient.patch(`/orders/${orderId}/confirm-delivery`);
+        const updatedOrder = adaptApiOrder(response.data, products);
+        setOrders(prev => prev.map(item => item.id === updatedOrder.id ? { ...item, ...updatedOrder } : item));
+        await loadNotifications().catch(() => undefined);
+        return { success: true, message: 'Delivery confirmed.' };
+      } catch (error: any) {
+        return { success: false, message: error.response?.data?.message || 'Unable to confirm delivery right now.' };
+      }
+    }
+
     setOrders(prev => prev.map(item => item.id === orderId ? { ...item, status: 'Delivered', deliveryConfirmed: true } : item));
 
     const vendorTotals = new Map<string, number>();
@@ -592,11 +751,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     }));
     notify(order.userId, 'Delivery confirmed', 'Thank you. Vendor earnings have been released after company fee deductions.', 'success');
+    return { success: true, message: 'Delivery confirmed.' };
   };
 
-  const requestRefund = (orderId: string, reason: string) => {
+  const requestRefund = async (orderId: string, reason: string) => {
     const order = orders.find(item => item.id === orderId);
-    if (!order) return;
+    if (!order) return { success: false, message: 'Order not found.' };
+    if (isAuthenticated) {
+      try {
+        const response = await apiClient.post(`/orders/${orderId}/refund`, { reason });
+        const updatedOrder = adaptApiOrder(response.data.order, products);
+        const refund = adaptApiRefund(response.data.refund);
+        setOrders(prev => prev.map(item => item.id === updatedOrder.id ? { ...item, ...updatedOrder } : item));
+        setRefunds(prev => [refund, ...prev.filter(item => item.id !== refund.id)]);
+        await loadWalletTransactions().catch(() => undefined);
+        await loadNotifications().catch(() => undefined);
+        const userResponse = await apiClient.get('/auth/me').catch(() => null);
+        if (userResponse) {
+          const updatedUser = adaptApiUser(userResponse.data);
+          setUsers(prev => prev.map(user => user.id === updatedUser.id ? { ...user, ...updatedUser } : user));
+        }
+        return { success: true, message: 'Refund approved and credited to wallet.' };
+      } catch (error: any) {
+        return { success: false, message: error.response?.data?.message || 'Unable to request refund right now.' };
+      }
+    }
+
     const deduction = order.amountPaid * (PLATFORM_SETTINGS.cancellationDeductionPercent / 100);
     const refundedAmount = Math.max(0, order.amountPaid - deduction);
     const request: RefundRequest = {
@@ -622,6 +802,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       note: `Refund for ${orderId} after ${PLATFORM_SETTINGS.cancellationDeductionPercent}% cancellation deduction.`,
       createdAt: new Date().toISOString(),
     }, ...prev]);
+    return { success: true, message: 'Refund approved and credited to wallet.' };
   };
 
   const fundWallet = async (amount: number) => {
@@ -854,6 +1035,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     toggleWishlist,
     loadWishlist,
     createOrder,
+    loadOrders,
+    loadRefunds,
     payNextInstallment,
     confirmDelivery,
     requestRefund,

@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsEnum, IsOptional, Min, IsArray, ValidateNested } from 'class-validator';
+import { IsArray, IsEnum, IsNumber, IsOptional, IsString, IsUrl, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { InstallmentType } from '@prisma/client';
 
@@ -10,6 +10,41 @@ export class OrderItemDto {
   @Min(1)
   @Type(() => Number)
   quantity: number;
+
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsString()
+  @IsOptional()
+  category?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  @Type(() => Number)
+  price?: number;
+
+  @IsUrl()
+  @IsOptional()
+  image?: string;
+
+  @IsString()
+  @IsOptional()
+  description?: string;
+
+  @IsString()
+  @IsOptional()
+  brand?: string;
+
+  @IsString()
+  @IsOptional()
+  color?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  sizes?: string[];
 }
 
 export class CreateOrderDto {
@@ -32,4 +67,13 @@ export class CreateOrderDto {
   @IsString()
   @IsOptional()
   voucherCode?: string;
+
+  @IsString()
+  @IsOptional()
+  affiliateCode?: string;
+}
+
+export class RefundOrderDto {
+  @IsString()
+  reason: string;
 }

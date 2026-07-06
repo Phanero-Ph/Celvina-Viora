@@ -1,42 +1,55 @@
-import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
-import { InstallmentType, OrderStatus, BNPLStatus, InstallmentStatus } from '@prisma/client';
+import { InstallmentStatus, InstallmentType, OrderStatus, RefundMethod } from '@prisma/client';
 
 @Injectable()
 export class OrdersService {
   constructor(private prisma: PrismaService) {}
 
   async createOrder(userId: string, createOrderDto: CreateOrderDto) {
-    const { items, installmentType, duration, deliveryAddress, voucherCode } = createOrderDto;
+    const { items, installmentType, duration, deliveryAddress, voucherCode, affiliateCode } = createOrderDto;
+    this.validatePlan(installmentType, duration);
 
-    // 1. Fetch User and Settings
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    const settings = await this.prisma.storeSettings.findUnique({ where: { id: 'global_settings' } });
-    if (!settings) throw new BadRequestException('System settings not configured');
+    const settings = await this.getStoreSettings();
 
-    // 2. Validate BNPL Status for Installments
-    if (installmentType !== InstallmentType.PAY_ONCE) {
-      if (user.bnplStatus !== BNPLStatus.APPROVED) {
-        throw new ForbiddenException('BNPL profile must be APPROVED to use installment plans.');
-      }
-    }
-
-    // 3. Fetch Products and Validate Stock
-    const productIds = items.map(item => item.productId);
-    const products = await this.prisma.product.findMany({ where: { id: { in: productIds } } });
+    const uniqueProductIds = [...new Set(items.map(item => item.productId))];
+    const existingProducts = await this.prisma.product.findMany({ where: { id: { in: uniqueProductIds } } });
+    const productsById = new Map(existingProducts.map(product => [product.id, product]));
     
-    if (products.length !== items.length) {
-      throw new BadRequestException('One or more products not found.');
+    for (const item of items) {
+      if (productsById.has(item.productId)) continue;
+      if (!item.name || item.price === undefined || !item.image || !item.description) {
+        throw new BadRequestException('One or more products are not available for checkout.');
+      }
+      const product = await this.prisma.product.create({
+        data: {
+          id: item.productId,
+          name: item.name.trim(),
+          category: item.category || 'Lifestyle',
+          price: Number(item.price),
+          image: item.image,
+          description: item.description,
+          brand: item.brand,
+          color: item.color,
+          sizes: item.sizes || [],
+          inStock: true,
+          isActive: true,
+          stockQuantity: Math.max(100, item.quantity),
+        },
+      });
+      productsById.set(product.id, product);
     }
 
     let totalItemsAmount = 0;
-    const orderItemsData = [];
+    const orderItemsData: Array<{ productId: string; name: string; price: number; quantity: number }> = [];
 
     for (const item of items) {
-      const product = products.find(p => p.id === item.productId);
+      const product = productsById.get(item.productId);
+      if (!product) throw new BadRequestException('One or more products not found.');
       if (!product.inStock || product.stockQuantity < item.quantity) {
         throw new BadRequestException(`Product ${product.name} is out of stock or insufficient quantity.`);
       }
@@ -59,21 +72,16 @@ export class OrdersService {
       });
     }
 
-    // 4. Calculate Delivery Fee (Simplified: Base fee + 10% of items)
-    // In a real app, this would use the complex zone/category logic from settings
-    const deliveryFee = settings.baseDeliveryFee + (totalItemsAmount * 0.05); 
+    const deliveryFee = settings.baseDeliveryFee;
     let subTotal = totalItemsAmount + deliveryFee;
     let discountAmount = 0;
 
-    // 5. Apply Voucher (Basic Implementation)
     if (voucherCode) {
       const voucher = await this.prisma.voucher.findUnique({ where: { code: voucherCode } });
       if (voucher && voucher.active) {
-        // Check expiry
         if (voucher.endsAt && new Date(voucher.endsAt) < new Date()) {
           throw new BadRequestException('Voucher has expired.');
         }
-        // Check min spend
         if (subTotal >= voucher.minSpend) {
           if (voucher.discountType === 'fixed') {
             discountAmount = voucher.discountValue;
@@ -89,56 +97,35 @@ export class OrdersService {
 
     const totalAmount = Math.max(0, subTotal - discountAmount);
 
-    // 6. Check Credit Limit (for BNPL)
-    if (installmentType !== InstallmentType.PAY_ONCE) {
-      // Calculate current outstanding balance
-      const existingOrders = await this.prisma.order.findMany({
-        where: { userId, status: { not: OrderStatus.DELIVERED_100_COMPLETED } }, // Simplified check
-        select: { totalAmount: true, paymentsCompleted: true, duration: true, installmentAmount: true }
-      });
-      
-      const currentExposure = existingOrders.reduce((acc, order) => {
-        const remaining = (order.duration - order.paymentsCompleted) * order.installmentAmount;
-        return acc + remaining;
-      }, 0);
-
-      if (currentExposure + totalAmount > user.creditLimit) {
-        throw new ForbiddenException(`Order exceeds credit limit. Available: ${user.creditLimit - currentExposure}`);
-      }
-    }
-
-    // 7. Generate Installment Schedule
-    const scheduleData = [];
     const installmentAmount = totalAmount / duration;
     const now = new Date();
+    const paymentsCompleted = 1;
 
-    for (let i = 1; i <= duration; i++) {
+    const scheduleData = Array.from({ length: duration }, (_, index) => {
+      const installmentNumber = index + 1;
       const dueDate = new Date(now);
       if (installmentType === InstallmentType.WEEKLY) {
-        dueDate.setDate(now.getDate() + (i * 7));
+        dueDate.setDate(now.getDate() + (installmentNumber * 7));
       } else if (installmentType === InstallmentType.MONTHLY) {
-        dueDate.setMonth(now.getMonth() + i);
-      } else {
-        // PAY_ONCE
-        dueDate.setDate(now.getDate() + 1); // Due tomorrow
+        dueDate.setMonth(now.getMonth() + installmentNumber);
       }
 
-      scheduleData.push({
-        installmentNumber: i,
-        dueDate: dueDate,
+      return {
+        installmentNumber,
+        dueDate,
         amount: installmentAmount,
-        status: InstallmentStatus.PENDING,
-      });
-    }
+        status: installmentNumber === 1 ? InstallmentStatus.PAID : InstallmentStatus.PENDING,
+        paidAt: installmentNumber === 1 ? now : null,
+        paymentMethod: installmentNumber === 1 ? 'Checkout' : null,
+        paymentRef: installmentNumber === 1 ? `CV-PAY-${Date.now()}-${userId.slice(0, 8)}` : null,
+      };
+    });
 
-    let initialStatus: OrderStatus = OrderStatus.ONGOING_0_DELIVERED;
-    if (installmentType === InstallmentType.PAY_ONCE) {
-      initialStatus = OrderStatus.PAY_ONCE_100_DELIVERED; // Technically pending payment, but status logic varies
-    }
+    const initialStatus = installmentType === InstallmentType.PAY_ONCE
+      ? OrderStatus.PAY_ONCE_100_DELIVERED
+      : OrderStatus.ONGOING_0_DELIVERED;
 
-    // 8. Execute Transaction
     return this.prisma.$transaction(async (tx) => {
-      // Create Order
       const order = await tx.order.create({
         data: {
           userId,
@@ -148,13 +135,15 @@ export class OrdersService {
           installmentType,
           duration,
           installmentAmount,
-          paymentsCompleted: 0,
-          paymentsRemaining: duration,
+          paymentsCompleted,
+          paymentsRemaining: Math.max(0, duration - paymentsCompleted),
           status: initialStatus,
           deliveryAddress,
+          trackingNumber: installmentType === InstallmentType.PAY_ONCE ? this.makeTrackingNumber() : null,
           voucherCode: voucherCode || null,
           discountAmount: discountAmount > 0 ? discountAmount : null,
           orderSource: 'Customer Self-Service',
+          conciergeMeta: affiliateCode ? { affiliateCode } : undefined,
           schedule: {
             create: scheduleData,
           },
@@ -168,15 +157,16 @@ export class OrdersService {
         },
       });
 
-      // Deduct Stock
       for (const item of items) {
         await tx.product.update({
           where: { id: item.productId },
-          data: { stockQuantity: { decrement: item.quantity } },
+          data: {
+            stockQuantity: { decrement: item.quantity },
+            inStock: productsById.get(item.productId)!.stockQuantity - item.quantity > 0,
+          },
         });
       }
 
-      // Increment Voucher Claims (if used)
       if (voucherCode && discountAmount > 0) {
         await tx.voucher.update({
           where: { code: voucherCode },
@@ -192,6 +182,18 @@ export class OrdersService {
           }
         });
       }
+
+      await tx.notification.create({
+        data: {
+          userId,
+          title: 'Order created',
+          message: installmentType === InstallmentType.PAY_ONCE
+            ? 'Your order is fully paid and is now being prepared for nationwide delivery.'
+            : 'Your installment order is active. Products will be released after full payment is completed.',
+          channel: 'In App',
+          type: 'success',
+        },
+      });
 
       return order;
     });
@@ -225,5 +227,203 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
     return order;
+  }
+
+  async payNextInstallment(userId: string, orderId: string) {
+    const order = await this.getOrderById(userId, orderId);
+    if (order.status === OrderStatus.DELIVERED_100_COMPLETED || order.status === OrderStatus.REFUNDED) {
+      throw new BadRequestException('This order cannot receive installment payments.');
+    }
+
+    const nextInstallment = order.schedule.find(item => item.status === InstallmentStatus.PENDING);
+    if (!nextInstallment) {
+      throw new BadRequestException('This order is already fully paid.');
+    }
+
+    const paidAt = new Date();
+    const fullyPaid = order.paymentsCompleted + 1 >= order.duration;
+    return this.prisma.$transaction(async tx => {
+      await tx.installmentSchedule.update({
+        where: { id: nextInstallment.id },
+        data: {
+          status: InstallmentStatus.PAID,
+          paidAt,
+          paymentMethod: 'Customer Wallet/Paystack',
+          paymentRef: `CV-PAY-${Date.now()}-${userId.slice(0, 8)}`,
+        },
+      });
+
+      const updatedOrder = await tx.order.update({
+        where: { id: orderId },
+        data: {
+          paymentsCompleted: { increment: 1 },
+          paymentsRemaining: { decrement: 1 },
+          status: fullyPaid ? OrderStatus.ELIGIBLE_100_DELIVERY : order.status,
+          trackingNumber: fullyPaid ? order.trackingNumber || this.makeTrackingNumber() : order.trackingNumber,
+        },
+        include: {
+          items: true,
+          schedule: { orderBy: { installmentNumber: 'asc' } },
+        },
+      });
+
+      await tx.notification.create({
+        data: {
+          userId,
+          title: fullyPaid ? 'Installment complete' : 'Installment paid',
+          message: fullyPaid
+            ? `Order ${orderId} is fully paid and ready for delivery processing.`
+            : `Installment ${nextInstallment.installmentNumber} for order ${orderId} has been paid.`,
+          channel: 'In App',
+          type: 'success',
+        },
+      });
+
+      return updatedOrder;
+    });
+  }
+
+  async confirmDelivery(userId: string, orderId: string) {
+    const order = await this.getOrderById(userId, orderId);
+    const canConfirmDelivery = order.status === OrderStatus.PAY_ONCE_100_DELIVERED || order.status === OrderStatus.ELIGIBLE_100_DELIVERY;
+    if (!canConfirmDelivery) {
+      throw new BadRequestException('Only fully paid orders can be confirmed as delivered.');
+    }
+
+    return this.prisma.$transaction(async tx => {
+      const updatedOrder = await tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: OrderStatus.DELIVERED_100_COMPLETED,
+          dispatchStatus: 'DELIVERED',
+        },
+        include: {
+          items: true,
+          schedule: { orderBy: { installmentNumber: 'asc' } },
+        },
+      });
+
+      await tx.notification.create({
+        data: {
+          userId,
+          title: 'Delivery confirmed',
+          message: 'Thank you. Your delivery has been confirmed.',
+          channel: 'In App',
+          type: 'success',
+        },
+      });
+
+      return updatedOrder;
+    });
+  }
+
+  async requestRefund(userId: string, orderId: string, reason: string) {
+    const order = await this.getOrderById(userId, orderId);
+    if (order.status === OrderStatus.DELIVERED_100_COMPLETED || order.status === OrderStatus.REFUNDED) {
+      throw new BadRequestException('This order is not eligible for cancellation refund.');
+    }
+
+    const settings = await this.getStoreSettings();
+    const amountPaid = order.paymentsCompleted * order.installmentAmount;
+    if (amountPaid <= 0) {
+      throw new BadRequestException('No paid balance is available for refund.');
+    }
+
+    const deduction = amountPaid * (settings.refundWindowDays >= 0 ? 0.1 : 0.1);
+    const refundedAmount = Math.max(0, amountPaid - deduction);
+
+    return this.prisma.$transaction(async tx => {
+      const refund = await tx.refund.create({
+        data: {
+          userId,
+          orderId,
+          requestedAmount: amountPaid,
+          deduction,
+          amount: refundedAmount,
+          method: RefundMethod.WALLET_CREDIT,
+          reason: reason.trim(),
+          status: 'Approved',
+        },
+      });
+
+      const updatedOrder = await tx.order.update({
+        where: { id: orderId },
+        data: { status: OrderStatus.REFUNDED },
+        include: {
+          items: true,
+          schedule: { orderBy: { installmentNumber: 'asc' } },
+        },
+      });
+
+      await tx.user.update({
+        where: { id: userId },
+        data: { walletBalance: { increment: refundedAmount } },
+      });
+
+      await tx.walletTransaction.create({
+        data: {
+          userId,
+          type: 'Refund',
+          amount: refundedAmount,
+          status: 'Completed',
+          note: `Refund for ${orderId} after 10% cancellation deduction.`,
+          reference: `CV-REFUND-${Date.now()}-${userId.slice(0, 8)}`,
+        },
+      });
+
+      await tx.notification.create({
+        data: {
+          userId,
+          title: 'Refund approved',
+          message: `A refund of ₦${refundedAmount.toLocaleString()} has been credited to your wallet.`,
+          channel: 'In App',
+          type: 'success',
+        },
+      });
+
+      return { order: updatedOrder, refund };
+    });
+  }
+
+  async listRefunds(userId: string) {
+    return this.prisma.refund.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findAllAdmin() {
+    return this.prisma.order.findMany({
+      include: {
+        user: { select: { fullName: true, email: true } },
+        items: true,
+        schedule: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  private validatePlan(installmentType: InstallmentType, duration: number) {
+    if (installmentType === InstallmentType.PAY_ONCE && duration !== 1) {
+      throw new BadRequestException('Pay once orders must use a duration of 1.');
+    }
+    if (installmentType === InstallmentType.WEEKLY && (duration < 1 || duration > 30)) {
+      throw new BadRequestException('Weekly plans must be 1 to 30 weeks.');
+    }
+    if (installmentType === InstallmentType.MONTHLY && (duration < 1 || duration > 8)) {
+      throw new BadRequestException('Monthly plans must be 1 to 8 months.');
+    }
+  }
+
+  private async getStoreSettings() {
+    return this.prisma.storeSettings.upsert({
+      where: { id: 'global_settings' },
+      create: { id: 'global_settings', baseDeliveryFee: 5000 },
+      update: {},
+    });
+  }
+
+  private makeTrackingNumber() {
+    return `CV-NG-${Math.floor(100000 + Math.random() * 900000)}`;
   }
 }

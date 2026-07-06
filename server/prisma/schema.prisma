@@ -41,6 +41,8 @@ enum OrderStatus {
   DELIVERED_100_COMPLETED
   PAY_ONCE_100_DELIVERED
   DEFAULTED
+  REFUND_REQUESTED
+  REFUNDED
 }
 
 enum InstallmentStatus {
@@ -395,6 +397,8 @@ model Refund {
   id        String        @id @default(uuid())
   userId    String
   orderId   String?
+  requestedAmount Float   @default(0)
+  deduction Float         @default(0)
   amount    Float
   method    RefundMethod
   reason    String
