@@ -7,6 +7,7 @@ import { ProductsModule } from './products/products.module';
 import { OrdersModule } from './orders/orders.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { AdsModule } from './ads/ads.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { AdsModule } from './ads/ads.module';
     OrdersModule,
     UploadsModule,
     AdsModule,
+    AdminModule,
   ],
   controllers: [],
   providers: [],

@@ -1163,8 +1163,9 @@ const normalizeAdminPermissionsForEditing = (permissions: string[] = []) => Arra
 ));
 
 const AdminDashboard: React.FC = () => {
-  const { currentUser, users, products, orders, refunds, vendorProfiles, vendorAds, affiliateRecords, settings, loadVendorAds } = useApp();
+  const { currentUser, users, products, orders, refunds, vendorProfiles, vendorAds, affiliateRecords, supportTickets, settings, loadVendorAds, loadAdminSupportTickets, respondSupportTicket, updateUserVerification, updateProductStatus, updateRefundStatus, loadPlatformSettings, updatePlatformSettings } = useApp();
   const [activePage, setActivePage] = useState<AdminPage>('overview');
+  const [adminNotice, setAdminNotice] = useState('');
   const gross = orders.reduce((sum, order) => sum + order.totalAmount, 0);
   const fees = orders.reduce((sum, order) => sum + order.items.reduce((itemSum, item) => itemSum + item.quantity * (settings.platformFeePerProduct + settings.maintenanceFeePerProduct), 0), 0);
   const adminItems: DashboardNavItem<AdminPage>[] = [
@@ -1194,7 +1195,23 @@ const AdminDashboard: React.FC = () => {
     if (activePage === 'ads' || activePage === 'overview' || activePage === 'analytics') {
       loadVendorAds().catch(() => undefined);
     }
+    if (activePage === 'support') {
+      loadAdminSupportTickets().catch(() => undefined);
+    }
+    if (activePage === 'settings') {
+      loadPlatformSettings().catch(() => undefined);
+    }
   }, [activePage]);
+
+  const runAdminAction = async (action: () => Promise<unknown>, successMessage: string) => {
+    try {
+      await action();
+      setAdminNotice(successMessage);
+    } catch (err: any) {
+      const message = err?.response?.data?.message;
+      setAdminNotice(Array.isArray(message) ? message.join(', ') : message || 'Unable to complete admin action.');
+    }
+  };
 
   return (
     <DashboardSidebarFrame
@@ -1204,6 +1221,7 @@ const AdminDashboard: React.FC = () => {
       onChange={setActivePage}
       items={navItems}
     >
+      {adminNotice && <div className="rounded-lg border border-[#374880]/20 bg-[#374880]/5 px-4 py-3 text-sm font-bold text-[#374880]">{adminNotice}</div>}
       {activePage === 'overview' && <div className="grid md:grid-cols-4 gap-4">
         <Metric label="Users" value={`${users.length}`} icon={<LayoutDashboard size={18} />} />
         <Metric label="Products" value={`${products.length}`} icon={<Package size={18} />} />
@@ -1219,13 +1237,13 @@ const AdminDashboard: React.FC = () => {
         <Panel title="Advertisements"><List items={vendorAds} render={ad => <span>{ad.placement} • {money(ad.cost)} • {ad.status}</span>} empty="No ads." /></Panel>
         <Panel title="Affiliate Commissions"><List items={affiliateRecords} render={record => <span>{record.customerName} • {money(record.commission)} • {record.status}</span>} empty="No affiliate records." /></Panel>
       </TwoColumn>}
-      {activePage === 'users' && <Panel title="User Groups"><List items={users} render={user => <span>{user.fullName} - {user.role} - {user.isVerified ? 'Verified' : 'Pending'}</span>} empty="No users." /></Panel>}
+      {activePage === 'users' && <Panel title="User Groups"><List items={users} render={user => <span>{user.fullName} - {user.role} - {user.isVerified ? 'Verified' : 'Pending'} <button onClick={() => runAdminAction(() => updateUserVerification(user.id, !user.isVerified), 'User verification updated.')} className="ml-2 text-[#374880] font-black">{user.isVerified ? 'Unverify' : 'Verify'}</button></span>} empty="No users." /></Panel>}
       {activePage === 'vendors' && <Panel title="Vendors"><List items={vendorProfiles} render={vendor => <span>{vendor.storeName} - Money Box {money(vendor.moneyBoxBalance)}</span>} empty="No vendors." /></Panel>}
-      {activePage === 'products' && <Panel title="Products"><List items={products} render={product => <span>{product.name} - {product.vendorName} - {money(product.price)} - {product.isActive ? 'Active' : 'Inactive'}</span>} empty="No products." /></Panel>}
+      {activePage === 'products' && <Panel title="Products"><List items={products} render={product => <span>{product.name} - {product.vendorName} - {money(product.price)} - {product.isActive ? 'Active' : 'Inactive'} <button onClick={() => runAdminAction(() => updateProductStatus(product.id, !product.isActive), 'Product status updated.')} className="ml-2 text-[#374880] font-black">{product.isActive ? 'Deactivate' : 'Activate'}</button></span>} empty="No products." /></Panel>}
       {activePage === 'orders' && <Panel title="Orders"><List items={orders} render={order => <span>{order.id} - {order.userFullName} - {order.status} - {money(order.totalAmount)}</span>} empty="No orders." /></Panel>}
       {activePage === 'payments' && <Panel title="Payments"><List items={orders} render={order => <span>{order.id} - Paid {money(order.amountPaid)} of {money(order.totalAmount)} - {order.paymentPlan.replace('_', ' ')}</span>} empty="No payments." /></Panel>}
       {activePage === 'deliveries' && <Panel title="Deliveries"><List items={orders} render={order => <span>{order.id} - {order.deliveryAddress} - {order.deliveryConfirmed ? 'Confirmed' : 'Pending confirmation'}</span>} empty="No deliveries." /></Panel>}
-      {activePage === 'refunds' && <Panel title="Refunds"><List items={refunds} render={refund => <span>{refund.orderId} - {refund.status} - {money(refund.refundedAmount)}</span>} empty="No refunds." /></Panel>}
+      {activePage === 'refunds' && <Panel title="Refunds"><List items={refunds} render={refund => <span>{refund.orderId} - {refund.status} - {money(refund.refundedAmount)} <button onClick={() => runAdminAction(() => updateRefundStatus(refund.id, 'Approved'), 'Refund approved.')} className="ml-2 text-[#374880] font-black">Approve</button> <button onClick={() => runAdminAction(() => updateRefundStatus(refund.id, 'Rejected'), 'Refund rejected.')} className="ml-2 text-red-600 font-black">Reject</button></span>} empty="No refunds." /></Panel>}
       {activePage === 'ads' && <Panel title="Advertisements"><List items={vendorAds} render={ad => <span>{ad.placement} - {money(ad.cost)} - {ad.status}</span>} empty="No ads." /></Panel>}
       {activePage === 'affiliates' && <Panel title="Affiliate Commissions"><List items={affiliateRecords} render={record => <span>{record.customerName} - {money(record.commission)} - {record.status}</span>} empty="No affiliate records." /></Panel>}
       {activePage === 'analytics' && (
@@ -1241,14 +1259,14 @@ const AdminDashboard: React.FC = () => {
           </Panel>
         </>
       )}
-      {activePage === 'support' && <Panel title="Support"><p className="text-sm text-gray-600 leading-6">Support admins handle customer and vendor questions about products, orders, deliveries, installments, wallets, refunds, vendors, and platform policies.</p></Panel>}
-      {activePage === 'settings' && <Panel title="Settings"><List items={[`Delivery fee: ${money(settings.deliveryFee)}`, `Refund deduction: ${settings.cancellationDeductionPercent}%`, `Support email: ${settings.supportEmail}`]} render={item => <span>{item}</span>} empty="No settings." /></Panel>}
+      {activePage === 'support' && <Panel title="Support Tickets"><List items={supportTickets} render={ticket => <span>{ticket.subject} - {ticket.status} <button onClick={() => runAdminAction(() => respondSupportTicket(ticket.id, { adminReply: 'Your request has been reviewed by Celvina Viora support.', status: 'RESOLVED' }), 'Support ticket resolved.')} className="ml-2 text-[#374880] font-black">Resolve</button></span>} empty="No support tickets." /></Panel>}
+      {activePage === 'settings' && <Panel title="Settings"><List items={[`Delivery fee: ${money(settings.deliveryFee)}`, `Refund deduction: ${settings.cancellationDeductionPercent}%`, `Support email: ${settings.supportEmail}`]} render={item => <span>{item}</span>} empty="No settings." /><button onClick={() => runAdminAction(() => updatePlatformSettings({ deliveryFee: settings.deliveryFee, supportEmail: settings.supportEmail }), 'Platform settings saved.')} className="btn-primary mt-3">Save settings</button></Panel>}
     </DashboardSidebarFrame>
   );
 };
 
 const SuperAdminDashboard: React.FC = () => {
-  const { users, products, orders, refunds, vendorProfiles, vendorAds, affiliateRecords, settings, createAdminUser, updateAdminPermissions, loadVendorAds } = useApp();
+  const { users, products, orders, refunds, vendorProfiles, vendorAds, affiliateRecords, supportTickets, settings, createAdminUser, updateAdminPermissions, loadVendorAds, loadAdminSupportTickets, respondSupportTicket, updateUserVerification, updateProductStatus, updateRefundStatus, loadPlatformSettings, updatePlatformSettings } = useApp();
   const [fullName, setFullName] = useState('New Celvina Viora Admin');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('+234');
@@ -1258,6 +1276,7 @@ const SuperAdminDashboard: React.FC = () => {
   const [editingPermissions, setEditingPermissions] = useState<string[]>([]);
   const [message, setMessage] = useState('');
   const [permissionMessage, setPermissionMessage] = useState('');
+  const [operationMessage, setOperationMessage] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [isSavingPermissions, setIsSavingPermissions] = useState(false);
   const [activePage, setActivePage] = useState<AdminPage | 'admins' | 'finance' | 'operations'>('overview');
@@ -1270,7 +1289,23 @@ const SuperAdminDashboard: React.FC = () => {
     if (activePage === 'ads' || activePage === 'overview' || activePage === 'operations' || activePage === 'analytics') {
       loadVendorAds().catch(() => undefined);
     }
+    if (activePage === 'support') {
+      loadAdminSupportTickets().catch(() => undefined);
+    }
+    if (activePage === 'settings') {
+      loadPlatformSettings().catch(() => undefined);
+    }
   }, [activePage]);
+
+  const runSuperAdminAction = async (action: () => Promise<unknown>, successMessage: string) => {
+    try {
+      await action();
+      setOperationMessage(successMessage);
+    } catch (err: any) {
+      const errorMessage = err?.response?.data?.message;
+      setOperationMessage(Array.isArray(errorMessage) ? errorMessage.join(', ') : errorMessage || 'Unable to complete operation.');
+    }
+  };
 
   const togglePermission = (permission: string) => {
     setPermissions(prev => prev.includes(permission)
@@ -1365,6 +1400,7 @@ const SuperAdminDashboard: React.FC = () => {
         { id: 'settings', label: 'Settings', icon: <Info size={17} /> },
       ]}
     >
+      {operationMessage && <div className="rounded-lg border border-[#374880]/20 bg-[#374880]/5 px-4 py-3 text-sm font-bold text-[#374880]">{operationMessage}</div>}
       {activePage === 'overview' && <div className="grid md:grid-cols-4 gap-4">
         <Metric label="Admins" value={`${admins.length}`} icon={<ShieldCheck size={18} />} />
         <Metric label="Users" value={`${users.length}`} icon={<LayoutDashboard size={18} />} />
@@ -1445,13 +1481,13 @@ const SuperAdminDashboard: React.FC = () => {
       {activePage === 'operations' && <Panel title="Catalog Control">
         <List items={products.slice(0, 8)} render={product => <span>{product.name} • {product.vendorName} • {money(product.price)} • {product.isActive ? 'Active' : 'Inactive'}</span>} empty="No products." />
       </Panel>}
-      {activePage === 'users' && <Panel title="Platform Users"><List items={users} render={user => <span>{user.fullName} - {user.role} - {user.isVerified ? 'Verified' : 'Pending'}</span>} empty="No users." /></Panel>}
+      {activePage === 'users' && <Panel title="Platform Users"><List items={users} render={user => <span>{user.fullName} - {user.role} - {user.isVerified ? 'Verified' : 'Pending'} <button onClick={() => runSuperAdminAction(() => updateUserVerification(user.id, !user.isVerified), 'User verification updated.')} className="ml-2 text-[#374880] font-black">{user.isVerified ? 'Unverify' : 'Verify'}</button></span>} empty="No users." /></Panel>}
       {activePage === 'vendors' && <Panel title="Vendors"><List items={vendorProfiles} render={vendor => <span>{vendor.storeName} - Money Box {money(vendor.moneyBoxBalance)}</span>} empty="No vendors." /></Panel>}
-      {activePage === 'products' && <Panel title="Products"><List items={products} render={product => <span>{product.name} - {product.vendorName} - {money(product.price)} - {product.isActive ? 'Active' : 'Inactive'}</span>} empty="No products." /></Panel>}
+      {activePage === 'products' && <Panel title="Products"><List items={products} render={product => <span>{product.name} - {product.vendorName} - {money(product.price)} - {product.isActive ? 'Active' : 'Inactive'} <button onClick={() => runSuperAdminAction(() => updateProductStatus(product.id, !product.isActive), 'Product status updated.')} className="ml-2 text-[#374880] font-black">{product.isActive ? 'Deactivate' : 'Activate'}</button></span>} empty="No products." /></Panel>}
       {activePage === 'orders' && <Panel title="Orders"><List items={orders} render={order => <span>{order.id} - {order.userFullName} - {order.status} - {money(order.totalAmount)}</span>} empty="No orders." /></Panel>}
       {activePage === 'payments' && <Panel title="Payments"><List items={orders} render={order => <span>{order.id} - Paid {money(order.amountPaid)} of {money(order.totalAmount)} - {order.paymentPlan.replace('_', ' ')}</span>} empty="No payments." /></Panel>}
       {activePage === 'deliveries' && <Panel title="Deliveries"><List items={orders} render={order => <span>{order.id} - {order.deliveryAddress} - {order.deliveryConfirmed ? 'Confirmed' : 'Pending confirmation'}</span>} empty="No deliveries." /></Panel>}
-      {activePage === 'refunds' && <Panel title="Refunds"><List items={refunds} render={refund => <span>{refund.orderId} - {refund.status} - {money(refund.refundedAmount)}</span>} empty="No refunds." /></Panel>}
+      {activePage === 'refunds' && <Panel title="Refunds"><List items={refunds} render={refund => <span>{refund.orderId} - {refund.status} - {money(refund.refundedAmount)} <button onClick={() => runSuperAdminAction(() => updateRefundStatus(refund.id, 'Approved'), 'Refund approved.')} className="ml-2 text-[#374880] font-black">Approve</button> <button onClick={() => runSuperAdminAction(() => updateRefundStatus(refund.id, 'Rejected'), 'Refund rejected.')} className="ml-2 text-red-600 font-black">Reject</button></span>} empty="No refunds." /></Panel>}
       {activePage === 'ads' && <Panel title="Advertisements"><List items={vendorAds} render={ad => <span>{ad.placement} - {money(ad.cost)} - {ad.status}</span>} empty="No ads." /></Panel>}
       {activePage === 'affiliates' && <Panel title="Affiliate Commissions"><List items={affiliateRecords} render={record => <span>{record.customerName} - {money(record.commission)} - {record.status}</span>} empty="No affiliate records." /></Panel>}
       {activePage === 'finance' && (
@@ -1472,8 +1508,8 @@ const SuperAdminDashboard: React.FC = () => {
           <Metric label="Ads" value={`${vendorAds.length}`} icon={<Megaphone size={18} />} />
         </div>
       )}
-      {activePage === 'support' && <Panel title="Support"><p className="text-sm text-gray-600 leading-6">Super admin can oversee support handling for products, orders, deliveries, installments, wallets, refunds, vendors, and platform policies.</p></Panel>}
-      {activePage === 'settings' && <Panel title="Platform Settings"><List items={[`Delivery fee: ${money(settings.deliveryFee)}`, `Refund deduction: ${settings.cancellationDeductionPercent}%`, `Referral reward: ${money(settings.referralReward)}`, `Affiliate commission: ${money(settings.affiliateCommission)}`, `Minimum reward purchase: ${money(settings.minimumRewardPurchase)}`, `Support email: ${settings.supportEmail}`]} render={item => <span>{item}</span>} empty="No settings." /></Panel>}
+      {activePage === 'support' && <Panel title="Support Tickets"><List items={supportTickets} render={ticket => <span>{ticket.subject} - {ticket.status} <button onClick={() => runSuperAdminAction(() => respondSupportTicket(ticket.id, { adminReply: 'Your request has been reviewed by Celvina Viora support.', status: 'RESOLVED' }), 'Support ticket resolved.')} className="ml-2 text-[#374880] font-black">Resolve</button></span>} empty="No support tickets." /></Panel>}
+      {activePage === 'settings' && <Panel title="Platform Settings"><List items={[`Delivery fee: ${money(settings.deliveryFee)}`, `Refund deduction: ${settings.cancellationDeductionPercent}%`, `Referral reward: ${money(settings.referralReward)}`, `Affiliate commission: ${money(settings.affiliateCommission)}`, `Minimum reward purchase: ${money(settings.minimumRewardPurchase)}`, `Support email: ${settings.supportEmail}`]} render={item => <span>{item}</span>} empty="No settings." /><button onClick={() => runSuperAdminAction(() => updatePlatformSettings({ deliveryFee: settings.deliveryFee, supportEmail: settings.supportEmail }), 'Platform settings saved.')} className="btn-primary mt-3">Save settings</button></Panel>}
     </DashboardSidebarFrame>
   );
 };

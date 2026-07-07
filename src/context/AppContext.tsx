@@ -100,6 +100,13 @@ interface AppContextType {
   createSupportTicket: (payload: { subject: string; message: string }) => Promise<SupportTicket>;
   createAdminUser: (payload: { fullName: string; email: string; phone: string; password: string; permissions: string[] }) => Promise<User>;
   updateAdminPermissions: (adminId: string, permissions: string[]) => Promise<User>;
+  loadAdminSupportTickets: () => Promise<SupportTicket[]>;
+  respondSupportTicket: (ticketId: string, payload: { adminReply: string; status: SupportTicket['status'] }) => Promise<SupportTicket>;
+  updateUserVerification: (userId: string, isVerified: boolean) => Promise<User>;
+  updateProductStatus: (productId: string, isActive: boolean) => Promise<Product>;
+  updateRefundStatus: (refundId: string, status: RefundRequest['status']) => Promise<RefundRequest>;
+  loadPlatformSettings: () => Promise<PlatformSettings>;
+  updatePlatformSettings: (payload: Partial<PlatformSettings>) => Promise<PlatformSettings>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -319,7 +326,21 @@ const adaptApiVendorAd = (apiAd: any): VendorAd => ({
   createdAt: apiAd.createdAt || new Date().toISOString(),
 });
 
+const adaptApiSettings = (apiSettings: any): PlatformSettings => ({
+  deliveryFee: Number(apiSettings.deliveryFee || PLATFORM_SETTINGS.deliveryFee),
+  platformFeePerProduct: Number(apiSettings.platformFeePerProduct || PLATFORM_SETTINGS.platformFeePerProduct),
+  maintenanceFeePerProduct: Number(apiSettings.maintenanceFeePerProduct || PLATFORM_SETTINGS.maintenanceFeePerProduct),
+  cancellationDeductionPercent: Number(apiSettings.cancellationDeductionPercent || PLATFORM_SETTINGS.cancellationDeductionPercent),
+  referralReward: Number(apiSettings.referralReward || PLATFORM_SETTINGS.referralReward),
+  affiliateCommission: Number(apiSettings.affiliateCommission || PLATFORM_SETTINGS.affiliateCommission),
+  minimumRewardPurchase: Number(apiSettings.minimumRewardPurchase || PLATFORM_SETTINGS.minimumRewardPurchase),
+  adOneDayCost: Number(apiSettings.adOneDayCost || PLATFORM_SETTINGS.adOneDayCost),
+  adTwoDayCost: Number(apiSettings.adTwoDayCost || PLATFORM_SETTINGS.adTwoDayCost),
+  supportEmail: apiSettings.supportEmail || PLATFORM_SETTINGS.supportEmail,
+});
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [settings, setSettings] = useState<PlatformSettings>(() => readSaved('cv_market_settings', PLATFORM_SETTINGS));
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(localStorage.getItem('cv_auth_token')));
   const [users, setUsers] = useState<User[]>(() => readSaved('cv_market_users', INITIAL_USERS));
   const [currentUserId, setCurrentUserId] = useState(() => readSaved('cv_market_current_user', INITIAL_USERS[0].id));
@@ -339,6 +360,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const currentUser = users.find(user => user.id === currentUserId) || users[0];
   const wishlist = wishlistByUser[currentUser.id] || [];
+
+  useEffect(() => { localStorage.setItem('cv_market_settings', JSON.stringify(settings)); }, [settings]);
 
   useEffect(() => {
     const token = localStorage.getItem('cv_auth_token');
@@ -1137,8 +1160,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return response.data;
   };
 
+  const loadAdminSupportTickets = async () => {
+    const response = await apiClient.get('/admin/support-tickets');
+    setSupportTickets(response.data);
+    return response.data;
+  };
+
+  const respondSupportTicket = async (ticketId: string, payload: { adminReply: string; status: SupportTicket['status'] }) => {
+    const response = await apiClient.patch(`/admin/support-tickets/${ticketId}/respond`, {
+      adminReply: payload.adminReply,
+      status: String(payload.status).toUpperCase(),
+    });
+    setSupportTickets(prev => prev.map(ticket => ticket.id === response.data.id ? response.data : ticket));
+    return response.data;
+  };
+
+  const updateUserVerification = async (userId: string, isVerified: boolean) => {
+    const response = await apiClient.patch(`/admin/users/${userId}/verification`, { isVerified });
+    const updatedUser = adaptApiUser(response.data);
+    setUsers(prev => prev.map(user => user.id === updatedUser.id ? { ...user, ...updatedUser } : user));
+    return updatedUser;
+  };
+
+  const updateProductStatus = async (productId: string, isActive: boolean) => {
+    const response = await apiClient.patch(`/admin/products/${productId}/status`, { isActive });
+    const product = adaptApiProduct(response.data);
+    setProducts(prev => prev.map(item => item.id === product.id ? { ...item, ...product } : item));
+    return product;
+  };
+
+  const updateRefundStatus = async (refundId: string, status: RefundRequest['status']) => {
+    const response = await apiClient.patch(`/admin/refunds/${refundId}/status`, { status });
+    const refund = adaptApiRefund(response.data);
+    setRefunds(prev => prev.map(item => item.id === refund.id ? { ...item, ...refund } : item));
+    return refund;
+  };
+
+  const loadPlatformSettings = async () => {
+    const response = await apiClient.get('/admin/settings');
+    const nextSettings = adaptApiSettings(response.data);
+    setSettings(nextSettings);
+    return nextSettings;
+  };
+
+  const updatePlatformSettings = async (payload: Partial<PlatformSettings>) => {
+    const response = await apiClient.patch('/admin/settings', payload);
+    const nextSettings = adaptApiSettings(response.data);
+    setSettings(nextSettings);
+    return nextSettings;
+  };
+
   const value = useMemo<AppContextType>(() => ({
-    settings: PLATFORM_SETTINGS,
+    settings,
     isAuthenticated,
     currentUser,
     users,
@@ -1196,7 +1269,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     createSupportTicket,
     createAdminUser,
     updateAdminPermissions,
-  }), [isAuthenticated, currentUser, users, products, cart, wishlist, orders, reviews, notifications, walletTransactions, refunds, vendorProfiles, vendorAds, affiliateRecords, communityPosts, supportTickets]);
+    loadAdminSupportTickets,
+    respondSupportTicket,
+    updateUserVerification,
+    updateProductStatus,
+    updateRefundStatus,
+    loadPlatformSettings,
+    updatePlatformSettings,
+  }), [settings, isAuthenticated, currentUser, users, products, cart, wishlist, orders, reviews, notifications, walletTransactions, refunds, vendorProfiles, vendorAds, affiliateRecords, communityPosts, supportTickets]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
